@@ -9,4 +9,179 @@ import logging
 from . import io
 from . import nd
 from . import symbol as sym
-from . import optimizer 
+from . import optimizer as opt
+from . import metric
+from . import kvstore as kvs
+from .context import Context, cpu
+from .initializer import Uniform
+from collections import namedtuple
+from .optimizer import get_updater
+from .executor_manager import DataParallelExecutorManager, _check_arguments, _load_data
+import threading
+import multiprocessing
+import os
+import copy
+
+BASE_ESTIMATOR = object
+
+try:
+    from sklearn.base import BaseEstimator
+    BASE_ESTIMATOR = BaseEstimator
+except ImportError:
+    SKLEARN_INSTALLED = False
+
+# Parameter to pass to batch_end_callback
+BatchEndParam = namedtuple('BatchEndParams',
+                           ['epoch',
+                            'nbatch',
+                            'eval_metric',
+                            'locals'])
+
+def _create_kvstore(kvstore, num_device, arg_params):
+    """Create kvstore
+    This function select and create a proper kvstore if given the kvstore type
+
+    Parameters
+    ----------
+    kvstore : KVStore or str
+        The kvstore
+    num_device : int
+        The number of devices
+    arg_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's weights.
+    """
+
+    if kvstore is None:
+        kv = None
+    elif isinstance(kvstore, kvs.KVStore):
+        kv = kvstore
+    elif isinstance(kvstore, str):
+        # create kvstore using the string type
+        if num_device is 1 and 'dist' not in kvstore:
+            # no need to use kv for single device and single machine
+            kv = None
+        else:
+            if kvstore is 'local':
+                # automatically select a proper local
+                max_size = max(np.prod(param.shape) for param in arg_params.values())
+                if max_size < 1024 * 1024 * 16:
+                    kvstore = 'local_update_cpu'
+                else:
+                    kvstore = 'local_allreduce_cpu'
+                logging.info('Auto-select kvstore type = %s', kvstore)
+            kv = kvs.create(kvstore)
+    else:
+        raise TypeError('kvstore must be KVStore, str or None')
+
+    # detect whether or not update weight on kvstore
+    update_on_kvstore = True
+    if not kv or 'local_allreduce' in kv.type:
+        update_on_kvstore = False
+
+    return (kv, update_on_kvstore)
+
+def _initialize_kvstore(kvstore, param_arrays, arg_params, param_names,
+                        update_on_kvstore):
+    """ Initialize kvstore"""
+    for idx in range(len(param_arrays)):
+        param_on_devs = param_arrays[idx]
+        kvstore.init(idx, arg_params[param_names[idx]])
+
+        if update_on_kvstore:
+            kvstore.pull(idx, param_on_devs, priority=-idx)
+
+def _update_params_on_kvstore(param_arrays, grad_arrays, kvstore):
+    """ Perform update of param_arrays from grad_arrays on kvstore."""
+    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
+        arg_list, grad_list = pair
+        if grad_list[0] is None:
+            continue
+        kvstore.push(index, grad_list, priority=-index)
+        kvstore.pull(index, arg_list, priority=-index)
+
+def _push_params_to_kvstore(param_arrays, grad_arrays, kvstore):
+    """ Perform update of param_arrays from grad_arrays on kvstore."""
+    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
+        arg_list, grad_list = pair
+        if grad_list[0] is None:
+            continue
+        kvstore.push(index, grad_list, priority=-index)
+        
+def _pull_params_from_kvstore(param_arrays, grad_arrays, kvstore):
+    """ Perform update of param_arrays from grad_arrays on kvstore."""
+    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
+        arg_list, grad_list = pair
+        if grad_list[0] is None:
+            continue
+        kvstore.pull(index, arg_list, priority=-index)
+
+'''
+author: yegeyan
+date: 2016.5.10 15:27
+'''
+'''
+def _pull_params_from_kvstore(key_list, param_arrays, grad_arrays, kvstore):
+    """ Perform pull  param_arrays from kvstore."""
+    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
+        arg_list, grad_list = pair
+        if grad_list[0] is None:
+            continue
+        # pull back the weights
+        kvstore.pull(key_list[index], arg_list, priority=-key_list[index])
+'''
+
+'''
+author: yegeyan
+date: 2016.5.10 15:56
+'''
+'''
+def _push_grads_to_kvstore(key_list, param_arrays, grad_arrays, kvstore):
+    """ Perform push  grad_arrays to kvstore."""
+    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
+        arg_list, grad_list = pair
+        if grad_list[0] is None:
+            continue
+        # push gradient, priority is negative index
+        kvstore.push(key_list[index], grad_list, priority=-key_list[index])
+'''
+
+def _update_params(param_arrays, grad_arrays, updater, num_device,
+                   kvstore=None):
+    """ Perform update of param_arrays from grad_arrays not on kvstore."""
+    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
+        arg_list, grad_list = pair
+        if grad_list[0] is None:
+            continue
+        if kvstore:
+            # push gradient, priority is negative index
+            kvstore.push(index, grad_list, priority=-index)
+            # pull back the sum gradients, to the same locations.
+            kvstore.pull(index, grad_list, priority=-index)
+        for k, p in enumerate(zip(arg_list, grad_list)):
+            # faked an index here, to make optimizer create diff
+            # state for the same index but on diff devs, TODO(mli)
+            # use a better solution latter
+            w, g = p
+            updater(index*num_device+k, g, w)
+
+def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
+                        arg_params, aux_params,
+                        begin_epoch, end_epoch, epoch_size, optimizer,
+                        kvstore, update_on_kvstore,
+                        train_data, eval_data=None, eval_metric=None,
+                        epoch_end_callback=None, batch_end_callback=None,
+                        logger=None, work_load_list=None, monitor=None,
+                        eval_batch_end_callback=None, sym_gen=None):
+    """Internal training function on multiple devices.
+    This function will also work for single device as well.
+    Parameters
+    ----------
+    symbol : Symbol
+        The network configuration
+    ctx : list of Context
+        The training devices.
+    arg_names: list of str
+        Name of all arguments of the network.
+    param_names: list of str
+        Name of all trainable parameters of the network.
+  
