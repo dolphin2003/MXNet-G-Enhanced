@@ -368,4 +368,142 @@ def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
                     key_list = list(range(PARAM_CENTER, PARAM_END))
                     t2 = threading.Thread(target=_pull_params_from_kvstore, args=
                                                  (key_list,
-                                         
+                                                  layer_param_arrays,
+                                                  layer_grad_arrays,
+                                                  kvstore))
+                    t2.setDaemon(True)
+                    t_list.append(t2)
+
+                    #forward_threads.append(t2)
+                    for t in t_list:
+                        t.start()
+                    for t in t_list:
+                        t.join()
+                    t_list = []
+
+                    layer_forward(is_train=True, begin=FORWARD_CENTER, end=FORWARD_END)
+                    
+                    #------------------------layerbackward_1-------------------------
+                    layer_backward(begin=BACKWARD_BEGIN, end=BACKWARD_CENTER)
+                    
+                    layer_param_arrays = executor_manager.param_arrays[PARAM_CENTER:PARAM_END]
+                    layer_grad_arrays = executor_manager.grad_arrays[PARAM_CENTER:PARAM_END]
+                    key_list = list(range(PARAM_CENTER, PARAM_END))
+
+                    t4 = threading.Thread(target=layer_backward, args=(BACKWARD_CENTER, BACKWARD_END))
+                    t4.setDaemon(True)
+                    t_list.append(t4)
+
+                    t3 = threading.Thread(target=_push_grads_to_kvstore, args=
+                                                (key_list,
+                                                  layer_param_arrays,
+                                                  layer_grad_arrays,
+                                                  kvstore))
+                    t3.setDaemon(True)
+                    t_list.append(t3)
+                    for t in t_list:
+                        t.start()
+                    for t in t_list:
+                        t.join()
+                    t_list = []
+
+                    layer_param_arrays = executor_manager.param_arrays[PARAM_BEGIN:PARAM_CENTER]
+                    layer_grad_arrays = executor_manager.grad_arrays[PARAM_BEGIN:PARAM_CENTER]
+                    key_list = list(range(PARAM_BEGIN, PARAM_CENTER))
+                    if update_on_kvstore:
+                        _push_grads_to_kvstore(key_list,
+                                                  layer_param_arrays,
+                                                  layer_grad_arrays,
+                                                  kvstore)
+                '''
+                    
+                if METHOD == 2:
+                    _pull_params_from_kvstore(executor_manager.param_arrays,
+                                                  executor_manager.grad_arrays,
+                                                  kvstore)
+                    executor_manager.forward(is_train=True)
+                    executor_manager.backward()
+                    _push_params_to_kvstore(executor_manager.param_arrays,
+                                                  executor_manager.grad_arrays,
+                                                  kvstore)
+                else:
+                    executor_manager.forward(is_train=True)
+                    executor_manager.backward()
+                    
+                    if update_on_kvstore:
+                        _update_params_on_kvstore(executor_manager.param_arrays,
+                                                  executor_manager.grad_arrays,
+                                                  kvstore)
+                    else:
+                        _update_params(executor_manager.param_arrays,
+                                       executor_manager.grad_arrays,
+                                       updater=updater,
+                                       num_device=len(ctx),
+                                       kvstore=kvstore)
+
+                if monitor is not None:
+                    monitor.toc_print()
+
+                # evaluate at end, so we can lazy copy
+                executor_manager.update_metric(eval_metric, data_batch.label)
+
+                nbatch += 1
+                # batch callback (for print purpose)
+                if batch_end_callback != None:
+                    batch_end_params = BatchEndParam(epoch=epoch,
+                                                     nbatch=nbatch,
+                                                     eval_metric=eval_metric,
+                                                     locals=locals())
+                    if isinstance(batch_end_callback, list):
+                        for call in batch_end_callback:
+                            call(batch_end_params)
+                    else:
+                        batch_end_callback(batch_end_params)
+
+                # this epoch is done possibly earlier
+                if epoch_size is not None and nbatch >= epoch_size:
+                    do_reset = False
+                    break
+
+            if do_reset == True:
+                logger.info('Epoch[%d] Resetting Data Iterator', epoch)
+                train_data.reset()
+
+            # this epoch is done
+            if epoch_size is None or nbatch >= epoch_size:
+                break
+
+        toc = time.time()
+        logger.info('Epoch[%d] Time cost=%.3f', epoch, (toc - tic))
+
+        if epoch_end_callback or epoch + 1 == end_epoch:
+            executor_manager.copy_to(arg_params, aux_params)
+
+        if epoch_end_callback != None:
+            if isinstance(epoch_end_callback, list):
+                for call in epoch_end_callback:
+                    call(epoch, symbol, arg_params, aux_params)
+            else:
+                epoch_end_callback(epoch, symbol, arg_params, aux_params)
+
+        # evaluation
+        if eval_data:
+            eval_metric.reset()
+            eval_data.reset()
+            for i, eval_batch in enumerate(eval_data):
+                executor_manager.load_data_batch(eval_batch)
+                executor_manager.forward(is_train=False)
+                executor_manager.update_metric(eval_metric, eval_batch.label)
+                if eval_batch_end_callback != None:
+                    batch_end_params = BatchEndParam(epoch=epoch,
+                                                     nbatch=i,
+                                                     eval_metric=eval_metric,
+                                                     locals=locals())
+                    if isinstance(eval_batch_end_callback, list):
+                        for call in eval_batch_end_callback:
+                            call(batch_end_params)
+                    else:
+                        eval_batch_end_callback(batch_end_params)
+            name_value = eval_metric.get_name_value()
+            for name, value in name_value:
+                logger.i
