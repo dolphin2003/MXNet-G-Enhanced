@@ -184,4 +184,188 @@ def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
         Name of all arguments of the network.
     param_names: list of str
         Name of all trainable parameters of the network.
-  
+    aux_names: list of str
+        Name of all auxiliary states of the network.
+    arg_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's weights.
+    aux_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's auxiliary states.
+    begin_epoch : int
+        The begining training epoch.
+    end_epoch : int
+        The end training epoch.
+    epoch_size : int, optional
+        Number of batches in a epoch. In default, it is set to
+        ceil(num_train_examples / batch_size)
+    optimizer : Optimizer
+        The optimization algorithm
+    train_data : DataIter
+        Training data iterator.
+    eval_data : DataIter
+        Validation data iterator.
+    eval_metric : EvalMetric
+        An evaluation function or a list of evaluation functions.
+    epoch_end_callback : callable(epoch, symbol, arg_params, aux_states)
+        A callback that is invoked at end of each epoch.
+        This can be used to checkpoint model each epoch.
+    batch_end_callback : callable(BatchEndParams)
+        A callback that is invoked at end of each batch.
+        This can be used to measure speed, get result from evaluation metric. etc.
+    kvstore : KVStore
+        The KVStore
+    update_on_kvstore : bool
+        whether or not perform weight updating on kvstore
+    logger : logging logger
+        When not specified, default logger will be used.
+    work_load_list : list of float or int, optional
+        The list of work load for different devices,
+        in the same order as ctx
+    monitor : Monitor, optional
+        Monitor installed to executor,
+        for monitoring outputs, weights, and gradients for debugging.
+    Notes
+    -----
+    - This function will inplace update the NDArrays in arg_params and aux_states.
+    """
+    METHOD = 2
+    if logger is None:
+        logger = logging
+    executor_manager = DataParallelExecutorManager(symbol=symbol,
+                                                   sym_gen=sym_gen,
+                                                   ctx=ctx,
+                                                   train_data=train_data,
+                                                   param_names=param_names,
+                                                   arg_names=arg_names,
+                                                   aux_names=aux_names,
+                                                   work_load_list=work_load_list,
+                                                   logger=logger)
+
+    if monitor:
+        executor_manager.install_monitor(monitor)
+
+    executor_manager.set_params(arg_params, aux_params)
+
+    if not update_on_kvstore:
+        updater = get_updater(optimizer)
+
+    if kvstore:
+        _initialize_kvstore(kvstore=kvstore,
+                            param_arrays=executor_manager.param_arrays,
+                            arg_params=arg_params,
+                            param_names=executor_manager.param_names,
+                            update_on_kvstore=update_on_kvstore)
+    #print "update_on_kvstore:%s" % update_on_kvstore
+    if update_on_kvstore:
+        kvstore.set_optimizer(optimizer)
+
+    # Now start training
+    train_data.reset()
+
+    '''-------------mnist
+    FORWARD_BEGIN = 0
+    FORWARD_BC_CENTER = 6
+    FORWARD_CENTER = 12
+    FORWARD_CE_CENTER = 16
+    FORWARD_END = 21
+    
+    BACKWARD_BEGIN = 22
+    BACKWARD_BC_CENTER = 24
+    BACKWARD_CENTER = 27
+    BACKWARD_CE_CENTER = 30
+    BACKWARD_END = 33
+    
+    PARAM_BEGIN = 0
+    PARAM_BC_CENTER = 2
+    PARAM_CENTER = 4
+    PARAM_CE_CENTER = 6
+    PARAM_END = 8 
+    #'''
+    
+    #'''-------------cifar10
+    FORWARD_BEGIN = 0
+    FORWARD_BC_CENTER = 47
+    FORWARD_CENTER = 84
+    FORWARD_CE_CENTER = 116
+    FORWARD_END = 153
+    
+    BACKWARD_BEGIN = 154
+    BACKWARD_BC_CENTER = 176
+    BACKWARD_CENTER = 192
+    BACKWARD_CE_CENTER = 214
+    BACKWARD_END = 237
+    
+    PARAM_BEGIN = 0
+    PARAM_BC_CENTER = 24
+    PARAM_CENTER = 44
+    PARAM_CE_CENTER = 60
+    PARAM_END = 78   
+    #'''
+    
+    '''-------------imagenet
+    FORWARD_BEGIN = 0
+    FORWARD_CENTER = 265
+    FORWARD_END = 513
+    
+    BACKWARD_BEGIN = 514
+    BACKWARD_CENTER = 631
+    BACKWARD_END = 757
+    
+    PARAM_BEGIN = 0
+    PARAM_CENTER = 145
+    PARAM_END = 278  
+    #'''
+    
+    def layer_forward(is_train, begin, end):
+        executor_manager.layerforward(is_train, begin, end)
+    def layer_backward(begin, end):
+        executor_manager.layerbackward(begin, end) 
+                
+    def pull_params_from_kvstore(layerforward):
+        layerforward.send(None)
+        for index, pair in enumerate(zip(executor_manager.param_arrays, executor_manager.grad_arrays)):
+            arg_list, grad_list = pair
+            if grad_list[0] is None:
+                continue
+            # pull back the weights
+            kvstore.pull(index, arg_list, priority=-index)
+            if index % 2 == 1:
+                layerforward.send(index) 
+        layerforward.close()
+    
+    t_list = []
+    p_list = []
+    for epoch in range(begin_epoch, end_epoch):
+        # Training phase
+        tic = time.time()
+        eval_metric.reset()
+        nbatch = 0
+        # Iterate over training data.
+        while True:
+            do_reset = True        
+            i = 0
+            for data_batch in train_data:
+                executor_manager.load_data_batch(data_batch)
+                i += 1
+                if monitor is not None:
+                    monitor.tic()
+                '''
+                if(METHOD == 1):
+                    #------------------------layerforward_1-------------------------
+                    layer_param_arrays = executor_manager.param_arrays[PARAM_BEGIN:PARAM_CENTER]
+                    layer_grad_arrays = executor_manager.grad_arrays[PARAM_BEGIN:PARAM_CENTER]
+                    key_list = list(range(PARAM_BEGIN, PARAM_CENTER))
+                    _pull_params_from_kvstore(key_list,
+                                                layer_param_arrays,
+                                                layer_grad_arrays,
+                                                kvstore)
+                    t1 = threading.Thread(target=layer_forward, args=(True, FORWARD_BEGIN, FORWARD_CENTER))
+                    t1.setDaemon(True)
+                    t_list.append(t1)
+
+                    #------------------------layerforward_2-------------------------
+                    layer_param_arrays = executor_manager.param_arrays[PARAM_CENTER:PARAM_END]
+                    layer_grad_arrays = executor_manager.grad_arrays[PARAM_CENTER:PARAM_END]
+                    key_list = list(range(PARAM_CENTER, PARAM_END))
+                    t2 = threading.Thread(target=_pull_params_from_kvstore, args=
+                                                 (key_list,
+                                         
