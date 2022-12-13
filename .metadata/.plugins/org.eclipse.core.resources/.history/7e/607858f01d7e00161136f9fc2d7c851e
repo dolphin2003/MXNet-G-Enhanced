@@ -506,4 +506,187 @@ def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
                         eval_batch_end_callback(batch_end_params)
             name_value = eval_metric.get_name_value()
             for name, value in name_value:
-                logger.i
+                logger.info('Epoch[%d] Validation-%s=%f', epoch, name, value)
+    # end of all epochs
+    return
+
+
+def save_checkpoint(prefix, epoch, symbol, arg_params, aux_params):
+    """Checkpoint the model data into file.
+
+    Parameters
+    ----------
+    prefix : str
+        Prefix of model name.
+    epoch : int
+        The epoch number of the model.
+    symbol : Symbol
+        The input symbol
+    arg_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's weights.
+    aux_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's auxiliary states.
+    Notes
+    -----
+    - ``prefix-symbol.json`` will be saved for symbol.
+    - ``prefix-epoch.params`` will be saved for parameters.
+    """
+    symbol.save('%s-symbol.json' % prefix)
+    save_dict = {('arg:%s' % k) : v for k, v in arg_params.items()}
+    save_dict.update({('aux:%s' % k) : v for k, v in aux_params.items()})
+    param_name = '%s-%04d.params' % (prefix, epoch)
+    nd.save(param_name, save_dict)
+    logging.info('Saved checkpoint to \"%s\"', param_name)
+
+
+def load_checkpoint(prefix, epoch):
+    """Load model checkpoint from file.
+
+    Parameters
+    ----------
+    prefix : str
+        Prefix of model name.
+    epoch : int
+        Epoch number of model we would like to load.
+
+    Returns
+    -------
+    symbol : Symbol
+        The symbol configuration of computation network.
+    arg_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's weights.
+    aux_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's auxiliary states.
+
+    Notes
+    -----
+    - symbol will be loaded from ``prefix-symbol.json``.
+    - parameters will be loaded from ``prefix-epoch.params``.
+    """
+    symbol = sym.load('%s-symbol.json' % prefix)
+    save_dict = nd.load('%s-%04d.params' % (prefix, epoch))
+    arg_params = {}
+    aux_params = {}
+    for k, v in save_dict.items():
+        tp, name = k.split(':', 1)
+        if tp == 'arg':
+            arg_params[name] = v
+        if tp == 'aux':
+            aux_params[name] = v
+    return (symbol, arg_params, aux_params)
+
+
+class FeedForward(BASE_ESTIMATOR):
+    """Model class of MXNet for training and predicting feedforward nets.
+    This class is designed for a single-data single output supervised network.
+
+    Parameters
+    ----------
+    symbol : Symbol
+        The symbol configuration of computation network.
+    ctx : Context or list of Context, optional
+        The device context of training and prediction.
+        To use multi GPU training, pass in a list of gpu contexts.
+    num_epoch : int, optional
+        Training parameter, number of training epochs(epochs).
+    epoch_size : int, optional
+        Number of batches in a epoch. In default, it is set to
+        ceil(num_train_examples / batch_size)
+    optimizer : str or Optimizer, optional
+        Training parameter, name or optimizer object for training.
+    initializer : initializer function, optional
+        Training parameter, the initialization scheme used.
+    numpy_batch_size : int, optional
+        The batch size of training data.
+        Only needed when input array is numpy.
+    arg_params : dict of str to NDArray, optional
+        Model parameter, dict of name to NDArray of net's weights.
+    aux_params : dict of str to NDArray, optional
+        Model parameter, dict of name to NDArray of net's auxiliary states.
+    allow_extra_params : boolean, optional
+        Whether allow extra parameters that are not needed by symbol
+        to be passed by aux_params and arg_params.
+        If this is True, no error will be thrown when aux_params and arg_params
+        contain extra parameters than needed.
+    begin_epoch : int, optional
+        The begining training epoch.
+    kwargs : dict
+        The additional keyword arguments passed to optimizer.
+    """
+    def __init__(self, symbol, ctx=None,
+                 num_epoch=None, epoch_size=None, optimizer='sgd',
+                 initializer=Uniform(0.01),
+                 numpy_batch_size=128,
+                 arg_params=None, aux_params=None,
+                 allow_extra_params=False,
+                 begin_epoch=0,
+                 **kwargs):
+
+        if isinstance(symbol, sym.Symbol):
+            self.symbol = symbol
+            self.sym_gen = None
+        else:
+            assert(callable(symbol))
+            self.symbol = None
+            self.sym_gen = symbol
+
+        # model parameters
+        self.arg_params = arg_params
+        self.aux_params = aux_params
+        self.allow_extra_params = allow_extra_params
+
+        self.argument_checked = False
+        if self.sym_gen is None:
+            self._check_arguments()
+
+        # basic configuration
+        if ctx is None:
+            ctx = [cpu()]
+        elif isinstance(ctx, Context):
+            ctx = [ctx]
+        self.ctx = ctx
+        # training parameters
+        self.num_epoch = num_epoch
+        self.epoch_size = epoch_size
+        self.kwargs = kwargs.copy()
+        self.optimizer = optimizer
+        self.initializer = initializer
+        self.numpy_batch_size = numpy_batch_size
+        # internal helper state
+        self._pred_exec = None
+        self.begin_epoch = begin_epoch
+
+    def _check_arguments(self):
+        """verify the argument of the default symbol and user provided parameters"""
+        if self.argument_checked:
+            return
+
+        assert(self.symbol is not None)
+        self.argument_checked = True
+
+        # check if symbol contain duplicated names.
+        _check_arguments(self.symbol)
+        # rematch parameters to delete useless ones
+        if self.allow_extra_params:
+            if self.arg_params:
+                arg_names = set(self.symbol.list_arguments())
+                self.arg_params = {k : v for k, v in self.arg_params.items()
+                                   if k in arg_names}
+            if self.aux_params:
+                aux_names = set(self.symbol.list_auxiliary_states())
+                self.aux_params = {k : v for k, v in self.aux_params.items()
+                                   if k in aux_names}
+
+
+    @staticmethod
+    def _is_data_arg(name):
+        """Check if name is a data argument."""
+        return name.endswith('data') or name.endswith('label')
+
+    def _init_params(self, input_shapes, overwrite=False):
+        """Initialize weight parameters and auxiliary states"""
+        arg_shapes, _, aux_shapes = self.symbol.infer_shape(**input_shapes)
+        assert(arg_shapes is not None)
+
+        arg_names = self.symbol.list_arguments()
+        input_names = inp
