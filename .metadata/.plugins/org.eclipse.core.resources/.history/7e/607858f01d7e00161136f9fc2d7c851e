@@ -689,4 +689,164 @@ class FeedForward(BASE_ESTIMATOR):
         assert(arg_shapes is not None)
 
         arg_names = self.symbol.list_arguments()
-        input_names = inp
+        input_names = input_shapes.keys()
+        param_names = [key for key in arg_names if key not in input_names]
+        aux_names = self.symbol.list_auxiliary_states()
+
+        param_name_shapes = [x for x in zip(arg_names, arg_shapes) if x[0] in param_names]
+        arg_params = {k : nd.zeros(s) for k, s in param_name_shapes}
+        aux_params = {k : nd.zeros(s) for k, s in zip(aux_names, aux_shapes)}
+
+        for k, v in arg_params.items():
+            if self.arg_params and k in self.arg_params and (not overwrite):
+                arg_params[k][:] = self.arg_params[k][:]
+            else:
+                self.initializer(k, v)
+
+        for k, v in aux_params.items():
+            if self.aux_params and k in self.aux_params and (not overwrite):
+                aux_params[k][:] = self.aux_params[k][:]
+            else:
+                self.initializer(k, v)
+
+        self.arg_params = arg_params
+        self.aux_params = aux_params
+        return (arg_names, list(param_names), aux_names)
+
+    def __getstate__(self):
+        this = self.__dict__.copy()
+        this['_pred_exec'] = None
+        return this
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+    def _init_predictor(self, input_shapes):
+        """Initialize the predictor module for running prediction."""
+        if self._pred_exec is not None:
+            arg_shapes, _, _ = self.symbol.infer_shape(**dict(input_shapes))
+            assert arg_shapes is not None, "Incomplete input shapes"
+            pred_shapes = [x.shape for x in self._pred_exec.arg_arrays]
+            if arg_shapes == pred_shapes:
+                return
+        # for now only use the first device
+        pred_exec = self.symbol.simple_bind(
+            self.ctx[0], grad_req='null', **dict(input_shapes))
+        pred_exec.copy_params_from(self.arg_params, self.aux_params)
+
+        _check_arguments(self.symbol)
+        self._pred_exec = pred_exec
+
+    def _init_iter(self, X, y, is_train):
+        """Initialize the iterator given input."""
+        if isinstance(X, (np.ndarray, nd.NDArray)):
+            if y is None:
+                if is_train:
+                    raise ValueError('y must be specified when X is numpy.ndarray')
+                else:
+                    y = np.zeros(X.shape[0])
+            if not isinstance(y, (np.ndarray, nd.NDArray)):
+                raise TypeError('y must be ndarray when X is numpy.ndarray')
+            if X.shape[0] != y.shape[0]:
+                raise ValueError("The numbers of data points and labels not equal")
+            if y.ndim == 2 and y.shape[1] == 1:
+                y = y.flatten()
+            if y.ndim != 1:
+                raise ValueError("Label must be 1D or 2D (with 2nd dimension being 1)")
+            if is_train:
+                return io.NDArrayIter(X, y, min(X.shape[0], self.numpy_batch_size),
+                                      shuffle=is_train, last_batch_handle='roll_over')
+            else:
+                return io.NDArrayIter(X, y, min(X.shape[0], self.numpy_batch_size), shuffle=False)
+        if not isinstance(X, io.DataIter):
+            raise TypeError('X must be DataIter, NDArray or numpy.ndarray')
+        return X
+
+    def _init_eval_iter(self, eval_data):
+        """Initialize the iterator given eval_data."""
+        if eval_data is None:
+            return eval_data
+        if isinstance(eval_data, (tuple, list)) and len(eval_data) == 2:
+            if eval_data[0] is not None:
+                if eval_data[1] is None and isinstance(eval_data[0], io.DataIter):
+                    return eval_data[0]
+                input_data = (np.array(eval_data[0]) if isinstance(eval_data[0], list)
+                              else eval_data[0])
+                input_label = (np.array(eval_data[1]) if isinstance(eval_data[1], list)
+                               else eval_data[1])
+                return self._init_iter(input_data, input_label, is_train=True)
+            else:
+                raise ValueError("Eval data is NONE")
+        if not isinstance(eval_data, io.DataIter):
+            raise TypeError('Eval data must be DataIter, or ' \
+                            'NDArray/numpy.ndarray/list pair (i.e. tuple/list of length 2)')
+        return eval_data
+
+    def predict(self, X, num_batch=None, return_data=False, reset=True):
+        """Run the prediction, always only use one device.
+        Parameters
+        ----------
+        X : mxnet.DataIter
+        num_batch : int or None
+            the number of batch to run. Go though all batches if None
+        Returns
+        -------
+        y : numpy.ndarray or a list of numpy.ndarray if the network has multiple outputs.
+            The predicted value of the output.
+        """
+        X = self._init_iter(X, None, is_train=False)
+
+        if reset:
+            X.reset()
+        data_shapes = X.provide_data
+        data_names = [x[0] for x in data_shapes]
+        self._init_predictor(data_shapes)
+        batch_size = X.batch_size
+        data_arrays = [self._pred_exec.arg_dict[name] for name in data_names]
+        output_list = [[] for _ in range(len(self._pred_exec.outputs))]
+        if return_data:
+            data_list = [[] for _ in X.provide_data]
+            label_list = [[] for _ in X.provide_label]
+
+        i = 0
+        for batch in X:
+            if num_batch is not None and i == num_batch:
+                break
+            i += 1
+
+            _load_data(batch, data_arrays)
+            self._pred_exec.forward(is_train=False)
+            padded = batch.pad
+            real_size = batch_size - padded
+
+            for o_list, o_nd in zip(output_list, self._pred_exec.outputs):
+                o_list.append(o_nd[0:real_size].asnumpy())
+
+            if return_data:
+                for j, x in enumerate(batch.data):
+                    data_list[j].append(x[0:real_size].asnumpy())
+                for j, x in enumerate(batch.label):
+                    label_list[j].append(x[0:real_size].asnumpy())
+
+        outputs = [np.concatenate(x) for x in output_list]
+        if len(outputs) == 1:
+            outputs = outputs[0]
+
+        if return_data:
+            data = [np.concatenate(x) for x in data_list]
+            label = [np.concatenate(x) for x in label_list]
+            if len(data) == 1:
+                data = data[0]
+            if len(label) == 1:
+                label = label[0]
+            return outputs, data, label
+        else:
+            return outputs
+
+    def score(self, X, eval_metric='acc', num_batch=None, batch_end_callback=None, reset=True):
+        """Run the model on X and calculate the score with eval_metric
+        Parameters
+        ----------
+        X : mxnet.DataIter
+        eval_metric : metric.metric
+            The metric for calculating score
