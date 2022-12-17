@@ -1,3 +1,4 @@
+
 # pylint: disable=fixme, invalid-name, too-many-arguments, too-many-locals, too-many-lines
 # pylint: disable=too-many-branches, too-many-statements
 """MXNet model module"""
@@ -101,18 +102,14 @@ def _update_params_on_kvstore(param_arrays, grad_arrays, kvstore):
 
 def _push_params_to_kvstore(param_arrays, grad_arrays, kvstore):
     """ Perform update of param_arrays from grad_arrays on kvstore."""
-    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
-        arg_list, grad_list = pair
+    for index, grad_list in enumerate(grad_arrays):
         if grad_list[0] is None:
             continue
         kvstore.push(index, grad_list, priority=-index)
         
 def _pull_params_from_kvstore(param_arrays, grad_arrays, kvstore):
     """ Perform update of param_arrays from grad_arrays on kvstore."""
-    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
-        arg_list, grad_list = pair
-        if grad_list[0] is None:
-            continue
+    for index, arg_list in enumerate(param_arrays):
         kvstore.pull(index, arg_list, priority=-index)
 
 '''
