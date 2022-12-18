@@ -224,7 +224,7 @@ def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
     -----
     - This function will inplace update the NDArrays in arg_params and aux_states.
     """
-    METHOD = 2
+    METHOD = 1
     if logger is None:
         logger = logging
     executor_manager = DataParallelExecutorManager(symbol=symbol,

@@ -100,22 +100,9 @@ def _update_params_on_kvstore(param_arrays, grad_arrays, kvstore):
         kvstore.push(index, grad_list, priority=-index)
         kvstore.pull(index, arg_list, priority=-index)
 
-def _push_params_to_kvstore(grad_arrays, kvstore):
-    """ Perform update of param_arrays from grad_arrays on kvstore."""
-    for index, grad_list in enumerate(grad_arrays):
-        if grad_list[0] is None:
-            continue
-        kvstore.push(index, grad_list, priority=-index)
-        
-def _pull_params_from_kvstore(param_arrays, kvstore):
-    """ Perform update of param_arrays from grad_arrays on kvstore."""
-    for index, arg_list in enumerate(param_arrays):
-        kvstore.pull(index, arg_list, priority=-index)
-
 '''
 author: yegeyan
 date: 2016.5.10 15:27
-'''
 '''
 def _pull_params_from_kvstore(key_list, param_arrays, grad_arrays, kvstore):
     """ Perform pull  param_arrays from kvstore."""
@@ -125,12 +112,10 @@ def _pull_params_from_kvstore(key_list, param_arrays, grad_arrays, kvstore):
             continue
         # pull back the weights
         kvstore.pull(key_list[index], arg_list, priority=-key_list[index])
-'''
 
 '''
 author: yegeyan
 date: 2016.5.10 15:56
-'''
 '''
 def _push_grads_to_kvstore(key_list, param_arrays, grad_arrays, kvstore):
     """ Perform push  grad_arrays to kvstore."""
@@ -140,7 +125,6 @@ def _push_grads_to_kvstore(key_list, param_arrays, grad_arrays, kvstore):
             continue
         # push gradient, priority is negative index
         kvstore.push(key_list[index], grad_list, priority=-key_list[index])
-'''
 
 def _update_params(param_arrays, grad_arrays, updater, num_device,
                    kvstore=None):
@@ -224,7 +208,7 @@ def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
     -----
     - This function will inplace update the NDArrays in arg_params and aux_states.
     """
-    METHOD = 2
+    METHOD = 1
     if logger is None:
         logger = logging
     executor_manager = DataParallelExecutorManager(symbol=symbol,
@@ -345,7 +329,6 @@ def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
                 i += 1
                 if monitor is not None:
                     monitor.tic()
-                '''
                 if(METHOD == 1):
                     #------------------------layerforward_1-------------------------
                     layer_param_arrays = executor_manager.param_arrays[PARAM_BEGIN:PARAM_CENTER]
@@ -412,15 +395,8 @@ def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
                                                   layer_param_arrays,
                                                   layer_grad_arrays,
                                                   kvstore)
-                '''
-                    
-                if METHOD == 2:
-                    _pull_params_from_kvstore(executor_manager.param_arrays,
-                                                  kvstore)
-                    executor_manager.forward(is_train=True)
-                    executor_manager.backward()
-                    _push_params_to_kvstore(executor_manager.grad_arrays,
-                                                  kvstore)
+                elif METHOD == 2:
+                    pass
                 else:
                     executor_manager.forward(is_train=True)
                     executor_manager.backward()
