@@ -101,4 +101,171 @@ def _update_params_on_kvstore(param_arrays, grad_arrays, kvstore):
 
 def _push_params_to_kvstore(param_arrays, grad_arrays, kvstore):
     """ Perform update of param_arrays from grad_arrays on kvstore."""
-    fo
+    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
+        arg_list, grad_list = pair
+        if grad_list[0] is None:
+            continue
+        kvstore.push(index, grad_list, priority=-index)
+        
+def _pull_params_from_kvstore(param_arrays, grad_arrays, kvstore):
+    """ Perform update of param_arrays from grad_arrays on kvstore."""
+    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
+        arg_list, grad_list = pair
+        if grad_list[0] is None:
+            continue
+        kvstore.pull(index, arg_list, priority=-index)
+
+'''
+author: yegeyan
+date: 2016.5.10 15:27
+'''
+'''
+def _pull_params_from_kvstore(key_list, param_arrays, grad_arrays, kvstore):
+    """ Perform pull  param_arrays from kvstore."""
+    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
+        arg_list, grad_list = pair
+        if grad_list[0] is None:
+            continue
+        # pull back the weights
+        kvstore.pull(key_list[index], arg_list, priority=-key_list[index])
+'''
+
+'''
+author: yegeyan
+date: 2016.5.10 15:56
+'''
+'''
+def _push_grads_to_kvstore(key_list, param_arrays, grad_arrays, kvstore):
+    """ Perform push  grad_arrays to kvstore."""
+    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
+        arg_list, grad_list = pair
+        if grad_list[0] is None:
+            continue
+        # push gradient, priority is negative index
+        kvstore.push(key_list[index], grad_list, priority=-key_list[index])
+'''
+
+def _update_params(param_arrays, grad_arrays, updater, num_device,
+                   kvstore=None):
+    """ Perform update of param_arrays from grad_arrays not on kvstore."""
+    for index, pair in enumerate(zip(param_arrays, grad_arrays)):
+        arg_list, grad_list = pair
+        if grad_list[0] is None:
+            continue
+        if kvstore:
+            # push gradient, priority is negative index
+            kvstore.push(index, grad_list, priority=-index)
+            # pull back the sum gradients, to the same locations.
+            kvstore.pull(index, grad_list, priority=-index)
+        for k, p in enumerate(zip(arg_list, grad_list)):
+            # faked an index here, to make optimizer create diff
+            # state for the same index but on diff devs, TODO(mli)
+            # use a better solution latter
+            w, g = p
+            updater(index*num_device+k, g, w)
+
+def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
+                        arg_params, aux_params,
+                        begin_epoch, end_epoch, epoch_size, optimizer,
+                        kvstore, update_on_kvstore,
+                        train_data, eval_data=None, eval_metric=None,
+                        epoch_end_callback=None, batch_end_callback=None,
+                        logger=None, work_load_list=None, monitor=None,
+                        eval_batch_end_callback=None, sym_gen=None):
+    """Internal training function on multiple devices.
+    This function will also work for single device as well.
+    Parameters
+    ----------
+    symbol : Symbol
+        The network configuration
+    ctx : list of Context
+        The training devices.
+    arg_names: list of str
+        Name of all arguments of the network.
+    param_names: list of str
+        Name of all trainable parameters of the network.
+    aux_names: list of str
+        Name of all auxiliary states of the network.
+    arg_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's weights.
+    aux_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's auxiliary states.
+    begin_epoch : int
+        The begining training epoch.
+    end_epoch : int
+        The end training epoch.
+    epoch_size : int, optional
+        Number of batches in a epoch. In default, it is set to
+        ceil(num_train_examples / batch_size)
+    optimizer : Optimizer
+        The optimization algorithm
+    train_data : DataIter
+        Training data iterator.
+    eval_data : DataIter
+        Validation data iterator.
+    eval_metric : EvalMetric
+        An evaluation function or a list of evaluation functions.
+    epoch_end_callback : callable(epoch, symbol, arg_params, aux_states)
+        A callback that is invoked at end of each epoch.
+        This can be used to checkpoint model each epoch.
+    batch_end_callback : callable(BatchEndParams)
+        A callback that is invoked at end of each batch.
+        This can be used to measure speed, get result from evaluation metric. etc.
+    kvstore : KVStore
+        The KVStore
+    update_on_kvstore : bool
+        whether or not perform weight updating on kvstore
+    logger : logging logger
+        When not specified, default logger will be used.
+    work_load_list : list of float or int, optional
+        The list of work load for different devices,
+        in the same order as ctx
+    monitor : Monitor, optional
+        Monitor installed to executor,
+        for monitoring outputs, weights, and gradients for debugging.
+    Notes
+    -----
+    - This function will inplace update the NDArrays in arg_params and aux_states.
+    """
+    METHOD = 1
+    if logger is None:
+        logger = logging
+    executor_manager = DataParallelExecutorManager(symbol=symbol,
+                                                   sym_gen=sym_gen,
+                                                   ctx=ctx,
+                                                   train_data=train_data,
+                                                   param_names=param_names,
+                                                   arg_names=arg_names,
+                                                   aux_names=aux_names,
+                                                   work_load_list=work_load_list,
+                                                   logger=logger)
+
+    if monitor:
+        executor_manager.install_monitor(monitor)
+
+    executor_manager.set_params(arg_params, aux_params)
+
+    if not update_on_kvstore:
+        updater = get_updater(optimizer)
+
+    if kvstore:
+        _initialize_kvstore(kvstore=kvstore,
+                            param_arrays=executor_manager.param_arrays,
+                            arg_params=arg_params,
+                            param_names=executor_manager.param_names,
+                            update_on_kvstore=update_on_kvstore)
+    #print "update_on_kvstore:%s" % update_on_kvstore
+    if update_on_kvstore:
+        kvstore.set_optimizer(optimizer)
+
+    # Now start training
+    train_data.reset()
+
+    '''-------------mnist
+    FORWARD_BEGIN = 0
+    FORWARD_BC_CENTER = 6
+    FORWARD_CENTER = 12
+    FORWARD_CE_CENTER = 16
+    FORWARD_END = 21
+    
+  
