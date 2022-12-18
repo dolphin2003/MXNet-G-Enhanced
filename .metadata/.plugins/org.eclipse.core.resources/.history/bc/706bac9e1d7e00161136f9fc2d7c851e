@@ -268,4 +268,168 @@ def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
     FORWARD_CE_CENTER = 16
     FORWARD_END = 21
     
-  
+    BACKWARD_BEGIN = 22
+    BACKWARD_BC_CENTER = 24
+    BACKWARD_CENTER = 27
+    BACKWARD_CE_CENTER = 30
+    BACKWARD_END = 33
+    
+    PARAM_BEGIN = 0
+    PARAM_BC_CENTER = 2
+    PARAM_CENTER = 4
+    PARAM_CE_CENTER = 6
+    PARAM_END = 8 
+    #'''
+    
+    #'''-------------cifar10
+    FORWARD_BEGIN = 0
+    FORWARD_BC_CENTER = 47
+    FORWARD_CENTER = 84
+    FORWARD_CE_CENTER = 116
+    FORWARD_END = 153
+    
+    BACKWARD_BEGIN = 154
+    BACKWARD_BC_CENTER = 176
+    BACKWARD_CENTER = 192
+    BACKWARD_CE_CENTER = 214
+    BACKWARD_END = 237
+    
+    PARAM_BEGIN = 0
+    PARAM_BC_CENTER = 24
+    PARAM_CENTER = 44
+    PARAM_CE_CENTER = 60
+    PARAM_END = 78   
+    #'''
+    
+    '''-------------imagenet
+    FORWARD_BEGIN = 0
+    FORWARD_CENTER = 265
+    FORWARD_END = 513
+    
+    BACKWARD_BEGIN = 514
+    BACKWARD_CENTER = 631
+    BACKWARD_END = 757
+    
+    PARAM_BEGIN = 0
+    PARAM_CENTER = 145
+    PARAM_END = 278  
+    #'''
+    
+    def layer_forward(is_train, begin, end):
+        executor_manager.layerforward(is_train, begin, end)
+    def layer_backward(begin, end):
+        executor_manager.layerbackward(begin, end) 
+                
+    def pull_params_from_kvstore(layerforward):
+        layerforward.send(None)
+        for index, pair in enumerate(zip(executor_manager.param_arrays, executor_manager.grad_arrays)):
+            arg_list, grad_list = pair
+            if grad_list[0] is None:
+                continue
+            # pull back the weights
+            kvstore.pull(index, arg_list, priority=-index)
+            if index % 2 == 1:
+                layerforward.send(index) 
+        layerforward.close()
+    
+    t_list = []
+    p_list = []
+    for epoch in range(begin_epoch, end_epoch):
+        # Training phase
+        tic = time.time()
+        eval_metric.reset()
+        nbatch = 0
+        # Iterate over training data.
+        while True:
+            do_reset = True        
+            i = 0
+            for data_batch in train_data:
+                executor_manager.load_data_batch(data_batch)
+                i += 1
+                if monitor is not None:
+                    monitor.tic()
+                '''
+                if(METHOD == 1):
+                    #------------------------layerforward_1-------------------------
+                    layer_param_arrays = executor_manager.param_arrays[PARAM_BEGIN:PARAM_CENTER]
+                    layer_grad_arrays = executor_manager.grad_arrays[PARAM_BEGIN:PARAM_CENTER]
+                    key_list = list(range(PARAM_BEGIN, PARAM_CENTER))
+                    _pull_params_from_kvstore(key_list,
+                                                layer_param_arrays,
+                                                layer_grad_arrays,
+                                                kvstore)
+                    t1 = threading.Thread(target=layer_forward, args=(True, FORWARD_BEGIN, FORWARD_CENTER))
+                    t1.setDaemon(True)
+                    t_list.append(t1)
+
+                    #------------------------layerforward_2-------------------------
+                    layer_param_arrays = executor_manager.param_arrays[PARAM_CENTER:PARAM_END]
+                    layer_grad_arrays = executor_manager.grad_arrays[PARAM_CENTER:PARAM_END]
+                    key_list = list(range(PARAM_CENTER, PARAM_END))
+                    t2 = threading.Thread(target=_pull_params_from_kvstore, args=
+                                                 (key_list,
+                                                  layer_param_arrays,
+                                                  layer_grad_arrays,
+                                                  kvstore))
+                    t2.setDaemon(True)
+                    t_list.append(t2)
+
+                    #forward_threads.append(t2)
+                    for t in t_list:
+                        t.start()
+                    for t in t_list:
+                        t.join()
+                    t_list = []
+
+                    layer_forward(is_train=True, begin=FORWARD_CENTER, end=FORWARD_END)
+                    
+                    #------------------------layerbackward_1-------------------------
+                    layer_backward(begin=BACKWARD_BEGIN, end=BACKWARD_CENTER)
+                    
+                    layer_param_arrays = executor_manager.param_arrays[PARAM_CENTER:PARAM_END]
+                    layer_grad_arrays = executor_manager.grad_arrays[PARAM_CENTER:PARAM_END]
+                    key_list = list(range(PARAM_CENTER, PARAM_END))
+
+                    t4 = threading.Thread(target=layer_backward, args=(BACKWARD_CENTER, BACKWARD_END))
+                    t4.setDaemon(True)
+                    t_list.append(t4)
+
+                    t3 = threading.Thread(target=_push_grads_to_kvstore, args=
+                                                (key_list,
+                                                  layer_param_arrays,
+                                                  layer_grad_arrays,
+                                                  kvstore))
+                    t3.setDaemon(True)
+                    t_list.append(t3)
+                    for t in t_list:
+                        t.start()
+                    for t in t_list:
+                        t.join()
+                    t_list = []
+
+                    layer_param_arrays = executor_manager.param_arrays[PARAM_BEGIN:PARAM_CENTER]
+                    layer_grad_arrays = executor_manager.grad_arrays[PARAM_BEGIN:PARAM_CENTER]
+                    key_list = list(range(PARAM_BEGIN, PARAM_CENTER))
+                    if update_on_kvstore:
+                        _push_grads_to_kvstore(key_list,
+                                                  layer_param_arrays,
+                                                  layer_grad_arrays,
+                                                  kvstore)
+                '''
+                    
+                if METHOD == 2:
+                    _pull_params_from_kvstore(executor_manager.param_arrays,
+                                                  executor_manager.grad_arrays,
+                                                  kvstore)
+                    executor_manager.forward(is_train=True)
+                    executor_manager.backward()
+                    _push_params_to_kvstore(executor_manager.param_arrays,
+                                                  executor_manager.grad_arrays,
+                                                  kvstore)
+                else:
+                    executor_manager.forward(is_train=True)
+                    executor_manager.backward()
+                    
+                    if update_on_kvstore:
+                        _update_params_on_kvstore(executor_manager.param_arrays,
+                                    
