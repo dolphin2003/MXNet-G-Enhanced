@@ -766,4 +766,159 @@ class FeedForward(BASE_ESTIMATOR):
         """Initialize the iterator given eval_data."""
         if eval_data is None:
             return eval_data
-     
+        if isinstance(eval_data, (tuple, list)) and len(eval_data) == 2:
+            if eval_data[0] is not None:
+                if eval_data[1] is None and isinstance(eval_data[0], io.DataIter):
+                    return eval_data[0]
+                input_data = (np.array(eval_data[0]) if isinstance(eval_data[0], list)
+                              else eval_data[0])
+                input_label = (np.array(eval_data[1]) if isinstance(eval_data[1], list)
+                               else eval_data[1])
+                return self._init_iter(input_data, input_label, is_train=True)
+            else:
+                raise ValueError("Eval data is NONE")
+        if not isinstance(eval_data, io.DataIter):
+            raise TypeError('Eval data must be DataIter, or ' \
+                            'NDArray/numpy.ndarray/list pair (i.e. tuple/list of length 2)')
+        return eval_data
+
+    def predict(self, X, num_batch=None, return_data=False, reset=True):
+        """Run the prediction, always only use one device.
+        Parameters
+        ----------
+        X : mxnet.DataIter
+        num_batch : int or None
+            the number of batch to run. Go though all batches if None
+        Returns
+        -------
+        y : numpy.ndarray or a list of numpy.ndarray if the network has multiple outputs.
+            The predicted value of the output.
+        """
+        X = self._init_iter(X, None, is_train=False)
+
+        if reset:
+            X.reset()
+        data_shapes = X.provide_data
+        data_names = [x[0] for x in data_shapes]
+        self._init_predictor(data_shapes)
+        batch_size = X.batch_size
+        data_arrays = [self._pred_exec.arg_dict[name] for name in data_names]
+        output_list = [[] for _ in range(len(self._pred_exec.outputs))]
+        if return_data:
+            data_list = [[] for _ in X.provide_data]
+            label_list = [[] for _ in X.provide_label]
+
+        i = 0
+        for batch in X:
+            if num_batch is not None and i == num_batch:
+                break
+            i += 1
+
+            _load_data(batch, data_arrays)
+            self._pred_exec.forward(is_train=False)
+            padded = batch.pad
+            real_size = batch_size - padded
+
+            for o_list, o_nd in zip(output_list, self._pred_exec.outputs):
+                o_list.append(o_nd[0:real_size].asnumpy())
+
+            if return_data:
+                for j, x in enumerate(batch.data):
+                    data_list[j].append(x[0:real_size].asnumpy())
+                for j, x in enumerate(batch.label):
+                    label_list[j].append(x[0:real_size].asnumpy())
+
+        outputs = [np.concatenate(x) for x in output_list]
+        if len(outputs) == 1:
+            outputs = outputs[0]
+
+        if return_data:
+            data = [np.concatenate(x) for x in data_list]
+            label = [np.concatenate(x) for x in label_list]
+            if len(data) == 1:
+                data = data[0]
+            if len(label) == 1:
+                label = label[0]
+            return outputs, data, label
+        else:
+            return outputs
+
+    def score(self, X, eval_metric='acc', num_batch=None, batch_end_callback=None, reset=True):
+        """Run the model on X and calculate the score with eval_metric
+        Parameters
+        ----------
+        X : mxnet.DataIter
+        eval_metric : metric.metric
+            The metric for calculating score
+        num_batch : int or None
+            the number of batch to run. Go though all batches if None
+        Returns
+        -------
+        s : float
+            the final score
+        """
+        # setup metric
+        if not isinstance(eval_metric, metric.EvalMetric):
+            eval_metric = metric.create(eval_metric)
+
+        X = self._init_iter(X, None, is_train=False)
+        if reset:
+            X.reset()
+
+        data_shapes = X.provide_data
+        data_names = [x[0] for x in data_shapes]
+        self._init_predictor(data_shapes)
+        data_arrays = [self._pred_exec.arg_dict[name] for name in data_names]
+
+        for i, batch in enumerate(X):
+            if num_batch is not None and i == num_batch:
+                break
+            _load_data(batch, data_arrays)
+            self._pred_exec.forward(is_train=False)
+            eval_metric.update(batch.label, self._pred_exec.outputs)
+
+            if batch_end_callback != None:
+                batch_end_params = BatchEndParam(epoch=0,
+                                                 nbatch=i,
+                                                 eval_metric=eval_metric,
+                                                 locals=locals())
+                if isinstance(batch_end_callback, list):
+                    for call in batch_end_callback:
+                        call(batch_end_params)
+                else:
+                    batch_end_callback(batch_end_params)
+        return eval_metric.get()[1]
+
+
+    def fit(self, X, y=None, eval_data=None, eval_metric='acc',
+            epoch_end_callback=None, batch_end_callback=None, kvstore='local', logger=None,
+            work_load_list=None, monitor=None, eval_batch_end_callback=None):
+        """Fit the model.
+
+        Parameters
+        ----------
+        X : DataIter, or numpy.ndarray/NDArray
+            Training data. If X is an DataIter, the name or, if not available,
+            position, of its outputs should match the corresponding variable
+            names defined in the symbolic graph.
+        y : numpy.ndarray/NDArray, optional
+            Training set label.
+            If X is numpy.ndarray/NDArray, y is required to be set.
+            While y can be 1D or 2D (with 2nd dimension as 1), its 1st dimension must be
+            the same as X, i.e. the number of data points and labels should be equal.
+        eval_data : DataIter or numpy.ndarray/list/NDArray pair
+            If eval_data is numpy.ndarray/list/NDArray pair,
+            it should be (valid_data, valid_label).
+        eval_metric : metric.EvalMetric or str or callable
+            The evaluation metric, name of evaluation metric.
+            Or a customize evaluation function that returns the statistics
+            based on minibatch.
+        epoch_end_callback : callable(epoch, symbol, arg_params, aux_states)
+            A callback that is invoked at end of each epoch.
+            This can be used to checkpoint model each epoch.
+        batch_end_callback: callable(epoch)
+            A callback that is invoked at end of each batch
+            For print purpose
+        kvstore: KVStore or str, optional
+           The KVStore or a string kvstore type: 'local', 'dist_sync', 'dist_async'
+           In default uses 'local', often no need to change for single 
