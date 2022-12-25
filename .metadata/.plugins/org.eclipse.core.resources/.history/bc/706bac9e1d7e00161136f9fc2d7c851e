@@ -1076,4 +1076,30 @@ class FeedForward(BASE_ESTIMATOR):
         eval_metric : metric.EvalMetric or str or callable
             The evaluation metric, name of evaluation metric.
             Or a customize evaluation function that returns the statistics
-            based
+            based on minibatch.
+        epoch_end_callback : callable(epoch, symbol, arg_params, aux_states)
+            A callback that is invoked at end of each epoch.
+            This can be used to checkpoint model each epoch.
+        batch_end_callback: callable(epoch)
+            A callback that is invoked at end of each batch
+            For print purpose
+        kvstore: KVStore or str, optional
+           The KVStore or a string kvstore type: 'local', 'dist_sync', 'dis_async'
+           In default uses 'local', often no need to change for single machiine.
+        logger : logging logger, optional
+            When not specified, default logger will be used.
+        work_load_list : list of float or int, optional
+            The list of work load for different devices,
+            in the same order as ctx
+        """
+        model = FeedForward(symbol, ctx=ctx, num_epoch=num_epoch,
+                            epoch_size=epoch_size,
+                            optimizer=optimizer, initializer=initializer, **kwargs)
+        model.fit(X, y, eval_data=eval_data, eval_metric=eval_metric,
+                  epoch_end_callback=epoch_end_callback,
+                  batch_end_callback=batch_end_callback,
+                  kvstore=kvstore,
+                  logger=logger,
+                  work_load_list=work_load_list,
+                  eval_batch_end_callback=eval_batch_end_callback)
+        return model
