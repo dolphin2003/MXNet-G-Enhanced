@@ -22,4 +22,263 @@ NULL
 #' @name mx.nd.argmax.channel
 NULL
 
-#' Calculate batched dot product 
+#' Calculate batched dot product of two matrices. (batch, M, K) batch_dot (batch, K, N) --> (batch, M, N)
+#' 
+#' @param lhs  NDArray
+#'     Left operand  to the function
+#' @param rhs  NDArray
+#'     Right operand to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.batch.dot
+NULL
+
+#' Broadcast data in the given axis to the given size. The original size of the broadcasting axis must be 1.
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param axis  Shape(tuple), optional, default=()
+#'     The axes to perform the broadcasting.
+#' @param size  Shape(tuple), optional, default=()
+#'     Target sizes of the broadcasting axes.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.broadcast.axis
+NULL
+
+#' lhs divide rhs with broadcast
+#' 
+#' @param lhs  NDArray
+#'     Left operand  to the function
+#' @param rhs  NDArray
+#'     Right operand to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.broadcast.div
+NULL
+
+#' lhs minus rhs with broadcast
+#' 
+#' @param lhs  NDArray
+#'     Left operand  to the function
+#' @param rhs  NDArray
+#'     Right operand to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.broadcast.minus
+NULL
+
+#' lhs multiple rhs with broadcast
+#' 
+#' @param lhs  NDArray
+#'     Left operand  to the function
+#' @param rhs  NDArray
+#'     Right operand to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.broadcast.mul
+NULL
+
+#' lhs add rhs with broadcast
+#' 
+#' @param lhs  NDArray
+#'     Left operand  to the function
+#' @param rhs  NDArray
+#'     Right operand to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.broadcast.plus
+NULL
+
+#' lhs power rhs with broadcast
+#' 
+#' @param lhs  NDArray
+#'     Left operand  to the function
+#' @param rhs  NDArray
+#'     Right operand to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.broadcast.power
+NULL
+
+#' Broadcast data to the target shape. The original size of the broadcasting axis must be 1.
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param shape  Shape(tuple), optional, default=()
+#'     The shape of the desired array. We can set the dim to zero if it's same as the original. E.g `A = broadcast_to(B, shape=(10, 0, 0))` has the same meaning as `A = broadcast_axis(B, axis=0, size=10)`.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.broadcast.to
+NULL
+
+#' Take ceil value of the src
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.ceil
+NULL
+
+#' Choose one element from each line(row for python, column for R/Julia) in lhs according to index indicated by rhs. This function assume rhs uses 0-based index.
+#' 
+#' @param lhs  NDArray
+#'     Left operand to the function.
+#' @param rhs  NDArray
+#'     Right operand to the function.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.choose.element.0index
+NULL
+
+#' Clip ndarray elements to range (a_min, a_max)
+#' 
+#' @param src  NDArray
+#'     Source input
+#' @param a.min  real_t
+#'     Minimum value
+#' @param a.max  real_t
+#'     Maximum value
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.clip
+NULL
+
+#' Take cos of the src
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.cos
+NULL
+
+#' Crop the input matrix and return a new one
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param begin  Shape(tuple), required
+#'     starting coordinates
+#' @param end  Shape(tuple), required
+#'     ending coordinates
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.crop
+NULL
+
+#' Calculate dot product of two matrices or two vectors
+#' 
+#' @param lhs  NDArray
+#'     Left operand  to the function
+#' @param rhs  NDArray
+#'     Right operand to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.dot
+NULL
+
+#' Take exp of the src
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.exp
+NULL
+
+#' Expand the shape of array by inserting a new axis.
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param axis  int (non-negative), required
+#'     Position (amongst axes) where new axis is to be inserted.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.expand.dims
+NULL
+
+#' Fill one element of each line(row for python, column for R/Julia) in lhs according to index indicated by rhs and values indicated by mhs. This function assume rhs uses 0-based index.
+#' 
+#' @param lhs  NDArray
+#'     Left operand to the function.
+#' @param mhs  NDArray
+#'     Middle operand to the function.
+#' @param rhs  NDArray
+#'     Right operand to the function.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.fill.element.0index
+NULL
+
+#' Flip the input matrix along axis and return a new one
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param axis  int, required
+#'     The dimension to flip
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.flip
+NULL
+
+#' Take floor value of the src
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.floor
+NULL
+
+#' Take log of the src
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.log
+NULL
+
+#' Take max of the src in the given axis and returns a NDArray. Follows numpy semantics.
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param axis  Shape(tuple), optional, default=()
+#'     Same as Numpy. The axes to perform the reduction.If left empty, a global reduction will be performed.
+#' @param keepdims  boolean, optional, default=False
+#'     Same as Numpy. If keepdims is set to true, the axis which is reduced is left in the result as dimension with size one.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.max
+NULL
+
+#' (Depreciated! Use max instead!) Take max of the src in the given axis and returns a NDArray. Follows numpy semantics.
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param axis  Shape(tuple), optional, default=()
+#'     Same as Numpy. The axes to perform the reduction.If left empty, a global reduction will be performed.
+#' @param keepdims  boolean, optional, default=False
+#'     Same as Numpy. If keepdims is set to true, the axis which is reduced is left in the result as d
