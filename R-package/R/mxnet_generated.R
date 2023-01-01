@@ -281,4 +281,224 @@ NULL
 #' @param axis  Shape(tuple), optional, default=()
 #'     Same as Numpy. The axes to perform the reduction.If left empty, a global reduction will be performed.
 #' @param keepdims  boolean, optional, default=False
-#'     Same as Numpy. If keepdims is set to true, the axis which is reduced is left in the result as d
+#'     Same as Numpy. If keepdims is set to true, the axis which is reduced is left in the result as dimension with size one.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.max.axis
+NULL
+
+#' Take min of the src in the given axis and returns a NDArray. Follows numpy semantics.
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param axis  Shape(tuple), optional, default=()
+#'     Same as Numpy. The axes to perform the reduction.If left empty, a global reduction will be performed.
+#' @param keepdims  boolean, optional, default=False
+#'     Same as Numpy. If keepdims is set to true, the axis which is reduced is left in the result as dimension with size one.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.min
+NULL
+
+#' (Depreciated! Use min instead!) Take min of the src in the given axis and returns a NDArray. Follows numpy semantics.
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param axis  Shape(tuple), optional, default=()
+#'     Same as Numpy. The axes to perform the reduction.If left empty, a global reduction will be performed.
+#' @param keepdims  boolean, optional, default=False
+#'     Same as Numpy. If keepdims is set to true, the axis which is reduced is left in the result as dimension with size one.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.min.axis
+NULL
+
+#' Take L2 norm of the src.The result will be ndarray of shape (1,) on the same device.
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.norm
+NULL
+
+#' Take round value of the src
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.round
+NULL
+
+#' Take rsqrt of the src
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.rsqrt
+NULL
+
+#' Take sign value of the src
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.sign
+NULL
+
+#' Take sin of the src
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.sin
+NULL
+
+#' Slice the input along certain axis and return a sliced array.
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param axis  int, required
+#'     The axis to be sliced
+#' @param begin  int, required
+#'     The beginning index to be sliced
+#' @param end  int, required
+#'     The end index to be sliced
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.slice.axis
+NULL
+
+#' Calculate Smooth L1 Loss(lhs, scalar)
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.smooth.l1
+NULL
+
+#' Calculate cross_entropy(lhs, one_hot(rhs))
+#' 
+#' @param lhs  NDArray
+#'     Left operand  to the function
+#' @param rhs  NDArray
+#'     Right operand to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.softmax.cross.entropy
+NULL
+
+#' Take sqrt of the src
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.sqrt
+NULL
+
+#' Take square of the src
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.square
+NULL
+
+#' Take sum of the src in the given axis and returns a NDArray. Follows numpy semantics.
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param axis  Shape(tuple), optional, default=()
+#'     Same as Numpy. The axes to perform the reduction.If left empty, a global reduction will be performed.
+#' @param keepdims  boolean, optional, default=False
+#'     Same as Numpy. If keepdims is set to true, the axis which is reduced is left in the result as dimension with size one.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.sum
+NULL
+
+#' (Depreciated! Use sum instead!) Take sum of the src in the given axis and returns a NDArray. Follows numpy semantics.
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param axis  Shape(tuple), optional, default=()
+#'     Same as Numpy. The axes to perform the reduction.If left empty, a global reduction will be performed.
+#' @param keepdims  boolean, optional, default=False
+#'     Same as Numpy. If keepdims is set to true, the axis which is reduced is left in the result as dimension with size one.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.sum.axis
+NULL
+
+#' Transpose the input matrix and return a new one
+#' 
+#' @param src  NDArray
+#'     Source input to the function
+#' @param axes  Shape(tuple), optional, default=()
+#'     Target axis order. By default the axes will be inverted.
+#' @return out The result mx.ndarray
+#' 
+#' @export
+#' @name mx.nd.transpose
+NULL
+
+#' Create iterator for dataset in csv.
+#' 
+#' @param data.csv  string, required
+#'     Dataset Param: Data csv path.
+#' @param data.shape  Shape(tuple), required
+#'     Dataset Param: Shape of the data.
+#' @param label.csv  string, optional, default='NULL'
+#'     Dataset Param: Label csv path. If is NULL, all labels will be returned as 0
+#' @param label.shape  Shape(tuple), optional, default=(1,)
+#'     Dataset Param: Shape of the label.
+#' @return iter The result mx.dataiter
+#' 
+#' @export
+mx.io.CSVIter <- function(...) {
+  mx.varg.io.CSVIter(list(...))
+}
+
+#' Create iterator for dataset packed in recordio.
+#' 
+#' @param path.imglist  string, optional, default=''
+#'     Dataset Param: Path to image list.
+#' @param path.imgrec  string, optional, default='./data/imgrec.rec'
+#'     Dataset Param: Path to image record file.
+#' @param aug.seq  string, optional, default='aug_default'
+#'     Augmentation Param: the augmenter names to represent sequence of augmenters to be applied, seperated by comma. Additional keyword parameters will be seen by these augmenters.
+#' @param label.width  int, optional, default='1'
+#'     Dataset Param: How many labels for an image.
+#' @param data.shape  Shape(tuple), required
+#'     Dataset Param: Shape of each instance generated by the DataIter.
+#' @param preprocess.threads  int, optional, default='4'
+#'     Backend Param: Number of thread to do preprocessing.
+#' @param verbose  boolean, optional, default=True
+#'     Auxiliary Param: Whether to output parser information.
+#' @param num.parts  int, optional, default='1'
+#'     partition the data into multiple parts
+#' @param part.index  int, optional, default='0'
+#'     the index of the part will read
+#' @param shuffle  b
