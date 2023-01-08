@@ -652,4 +652,192 @@ mx.symbol.BatchNorm <- function(...) {
 #' @return out The result mx.symbol
 #' 
 #' @export
-mx.symbol.BlockG
+mx.symbol.BlockGrad <- function(...) {
+  mx.varg.symbol.BlockGrad(list(...))
+}
+
+#' Cast array to a different data type.
+#' 
+#' @param data  Symbol
+#'     Input data to cast function.
+#' @param dtype  {'float16', 'float32', 'float64', 'int32', 'uint8'}, required
+#'     Target data type.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.Cast <- function(...) {
+  mx.varg.symbol.Cast(list(...))
+}
+
+#' Apply convolution to input then add a bias.
+#' 
+#' @param data  Symbol
+#'     Input data to the ConvolutionOp.
+#' @param weight  Symbol
+#'     Weight matrix.
+#' @param bias  Symbol
+#'     Bias parameter.
+#' @param kernel  Shape(tuple), required
+#'     convolution kernel size: (y, x)
+#' @param stride  Shape(tuple), optional, default=(1,1)
+#'     convolution stride: (y, x)
+#' @param dilate  Shape(tuple), optional, default=(1,1)
+#'     convolution dilate: (y, x)
+#' @param pad  Shape(tuple), optional, default=(0,0)
+#'     pad for convolution: (y, x)
+#' @param num.filter  int (non-negative), required
+#'     convolution filter(channel) number
+#' @param num.group  int (non-negative), optional, default=1
+#'     Number of groups partition. This option is not supported by CuDNN, you can use SliceChannel to num_group,apply convolution and concat instead to achieve the same need.
+#' @param workspace  long (non-negative), optional, default=512
+#'     Tmp workspace for convolution (MB).
+#' @param no.bias  boolean, optional, default=False
+#'     Whether to disable bias parameter.
+#' @param cudnn.tune  {'fastest', 'limited_workspace', 'off'},optional, default='limited_workspace'
+#'     Whether to find convolution algo by running performance test.Leads to higher startup time but may give better speed
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.Convolution <- function(...) {
+  mx.varg.symbol.Convolution(list(...))
+}
+
+#' Crop the 2nd and 3rd dim of input data, with the corresponding size of h_w or with width and height of the second input symbol, i.e., with one input, we need h_w to specify the crop height and width, otherwise the second input symbol's size will be used
+#' 
+#' @param data  Symbol or Symbol[]
+#'     Tensor or List of Tensors, the second input will be used as crop_like shape reference
+#' @param num.args  int, required
+#'     Number of inputs for crop, if equals one, then we will use the h_wfor crop height and width, else if equals two, then we will use the heightand width of the second input symbol, we name crop_like here
+#' @param offset  Shape(tuple), optional, default=(0,0)
+#'     crop offset coordinate: (y, x)
+#' @param h.w  Shape(tuple), optional, default=(0,0)
+#'     crop height and weight: (h, w)
+#' @param center.crop  boolean, optional, default=False
+#'     If set to true, then it will use be the center_crop,or it will crop using the shape of crop_like
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.Crop <- function(...) {
+  mx.varg.symbol.Crop(list(...))
+}
+
+#' Custom operator implemented in frontend.
+#' 
+#' @param op.type  string
+#'     Type of custom operator. Must be registered first.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.Custom <- function(...) {
+  mx.varg.symbol.Custom(list(...))
+}
+
+#' Apply deconvolution to input then add a bias.
+#' 
+#' @param data  Symbol
+#'     Input data to the DeconvolutionOp.
+#' @param weight  Symbol
+#'     Weight matrix.
+#' @param bias  Symbol
+#'     Bias parameter.
+#' @param kernel  Shape(tuple), required
+#'     deconvolution kernel size: (y, x)
+#' @param stride  Shape(tuple), optional, default=(1,1)
+#'     deconvolution stride: (y, x)
+#' @param pad  Shape(tuple), optional, default=(0,0)
+#'     pad for deconvolution: (y, x), a good number is : (kernel-1)/2, if target_shape set, pad will be ignored and will be computed automatically
+#' @param adj  Shape(tuple), optional, default=(0,0)
+#'     adjustment for output shape: (y, x), if target_shape set, adj will be ignored and will be computed automatically
+#' @param target.shape  Shape(tuple), optional, default=(0,0)
+#'     output shape with targe shape : (y, x)
+#' @param num.filter  int (non-negative), required
+#'     deconvolution filter(channel) number
+#' @param num.group  int (non-negative), optional, default=1
+#'     number of groups partition
+#' @param workspace  long (non-negative), optional, default=512
+#'     Tmp workspace for deconvolution (MB)
+#' @param no.bias  boolean, optional, default=True
+#'     Whether to disable bias parameter.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.Deconvolution <- function(...) {
+  mx.varg.symbol.Deconvolution(list(...))
+}
+
+#' Apply dropout to input
+#' 
+#' @param data  Symbol
+#'     Input data to dropout.
+#' @param p  float, optional, default=0.5
+#'     Fraction of the input that gets dropped out at training time
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.Dropout <- function(...) {
+  mx.varg.symbol.Dropout(list(...))
+}
+
+#' Perform an elementwise sum over all the inputs.
+#' 
+#' @param num.args  int, required
+#'     Number of inputs to be summed.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.ElementWiseSum <- function(...) {
+  mx.varg.symbol.ElementWiseSum(list(...))
+}
+
+#' Get embedding for one-hot input. A n-dimensional input tensor will be trainsformed into a (n+1)-dimensional tensor, where a new dimension is added for the embedding results.
+#' 
+#' @param data  Symbol
+#'     Input data to the EmbeddingOp.
+#' @param weight  Symbol
+#'     Enbedding weight matrix.
+#' @param input.dim  int, required
+#'     input dim of one-hot encoding
+#' @param output.dim  int, required
+#'     output dim of embedding
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.Embedding <- function(...) {
+  mx.varg.symbol.Embedding(list(...))
+}
+
+#' Flatten input
+#' 
+#' @param data  Symbol
+#'     Input data to flatten.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.Flatten <- function(...) {
+  mx.varg.symbol.Flatten(list(...))
+}
+
+#' Apply matrix multiplication to input then add a bias.
+#' 
+#' @param data  Symbol
+#'     Input data to the FullyConnectedOp.
+#' @param weight  Symbol
+#'     Weight matr
