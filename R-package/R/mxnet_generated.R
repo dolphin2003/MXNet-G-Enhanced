@@ -1027,4 +1027,147 @@ mx.symbol.Pooling <- function(...) {
 #' @param data  Symbol
 #'     Input data to the pooling operator, a 4D Feature maps
 #' @param rois  Symbol
-#'     Bounding box coordinates, a 2D array of [[batch_index, x1, y1, x2, y2]]. (x1, y1) and (x2, y2) are top left and down right corners of designated region of interest. batch_index indicates the index of corresponding
+#'     Bounding box coordinates, a 2D array of [[batch_index, x1, y1, x2, y2]]. (x1, y1) and (x2, y2) are top left and down right corners of designated region of interest. batch_index indicates the index of corresponding image in the input data
+#' @param pooled.size  Shape(tuple), required
+#'     fix pooled size: (h, w)
+#' @param spatial.scale  float, required
+#'     Ratio of input feature map height (or w) to raw image height (or w). Equals the reciprocal of total stride in convolutional layers
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.ROIPooling <- function(...) {
+  mx.varg.symbol.ROIPooling(list(...))
+}
+
+#' Reshape input to target shape
+#' 
+#' @param data  Symbol
+#'     Input data to reshape.
+#' @param target.shape  Shape(tuple), optional, default=(0,0)
+#'     (Deprecated! Use shape instead.) Target new shape. One and only one dim can be 0, in which case it will be inferred from the rest of dims
+#' @param keep.highest  boolean, optional, default=False
+#'     (Deprecated! Use shape instead.) Whether keep the highest dim unchanged.If set to yes, than the first dim in target_shape is ignored,and always fixed as input
+#' @param shape  , optional, default=()
+#'     Target new shape. If the dim is same, set it to 0. If the dim is set to be -1, it will be inferred from the rest of dims. One and only one dim can be -1
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.Reshape <- function(...) {
+  mx.varg.symbol.Reshape(list(...))
+}
+
+#' Slice input equally along specified axis
+#' 
+#' @param num.outputs  int, required
+#'     Number of outputs to be sliced.
+#' @param axis  int, optional, default='1'
+#'     Dimension along which to slice.
+#' @param squeeze.axis  boolean, optional, default=False
+#'     If true AND the sliced dimension becomes 1, squeeze that dimension.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.SliceChannel <- function(...) {
+  mx.varg.symbol.SliceChannel(list(...))
+}
+
+#' DEPRECATED: Perform a softmax transformation on input. Please use SoftmaxOutput
+#' 
+#' @param data  Symbol
+#'     Input data to softmax.
+#' @param grad.scale  float, optional, default=1
+#'     Scale the gradient by a float factor
+#' @param ignore.label  float, optional, default=-1
+#'     the label value will be ignored during backward (only works if use_ignore is set to be true).
+#' @param multi.output  boolean, optional, default=False
+#'     If set to true, for a (n,k,x_1,..,x_n) dimensional input tensor, softmax will generate n*x_1*...*x_n output, each has k classes
+#' @param use.ignore  boolean, optional, default=False
+#'     If set to true, the ignore_label value will not contribute to the backward gradient
+#' @param normalization  {'batch', 'null', 'valid'},optional, default='null'
+#'     If set to null, op will do nothing on output gradient.If set to batch, op will normalize gradient by divide batch sizeIf set to valid, op will normalize gradient by divide sample not ignored
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.Softmax <- function(...) {
+  mx.varg.symbol.Softmax(list(...))
+}
+
+#' Apply softmax activation to input. This is intended for internal layers. For output (loss layer) please use SoftmaxOutput. If type=instance, this operator will compute a softmax for each instance in the batch; this is the default mode. If type=channel, this operator will compute a num_channel-class softmax at each position of each instance; this can be used for fully convolutional network, image segmentation, etc.
+#' 
+#' @param data  Symbol
+#'     Input data to activation function.
+#' @param mode  {'channel', 'instance'},optional, default='instance'
+#'     Softmax Mode. If set to instance, this operator will compute a softmax for each instance in the batch; this is the default mode. If set to channel, this operator will compute a num_channel-class softmax at each position of each instance; this can be used for fully convolutional network, image segmentation, etc.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.SoftmaxActivation <- function(...) {
+  mx.varg.symbol.SoftmaxActivation(list(...))
+}
+
+#' Perform a softmax transformation on input, backprop with logloss.
+#' 
+#' @param data  Symbol
+#'     Input data to softmax.
+#' @param label  Symbol
+#'     Label data, can also be probability value with same shape as data
+#' @param grad.scale  float, optional, default=1
+#'     Scale the gradient by a float factor
+#' @param ignore.label  float, optional, default=-1
+#'     the label value will be ignored during backward (only works if use_ignore is set to be true).
+#' @param multi.output  boolean, optional, default=False
+#'     If set to true, for a (n,k,x_1,..,x_n) dimensional input tensor, softmax will generate n*x_1*...*x_n output, each has k classes
+#' @param use.ignore  boolean, optional, default=False
+#'     If set to true, the ignore_label value will not contribute to the backward gradient
+#' @param normalization  {'batch', 'null', 'valid'},optional, default='null'
+#'     If set to null, op will do nothing on output gradient.If set to batch, op will normalize gradient by divide batch sizeIf set to valid, op will normalize gradient by divide sample not ignored
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.SoftmaxOutput <- function(...) {
+  mx.varg.symbol.SoftmaxOutput(list(...))
+}
+
+#' Apply spatial transformer to input feature map.
+#' 
+#' @param data  Symbol
+#'     Input data to the SpatialTransformerOp.
+#' @param loc  Symbol
+#'     localisation net, the output dim should be 6 when transform_type is affine, and the name of loc symbol should better starts with 'stn_loc', so that initialization it with iddentify tranform, or you shold initialize the weight and bias by yourself.
+#' @param target.shape  Shape(tuple), optional, default=(0,0)
+#'     output shape(h, w) of spatial transformer: (y, x)
+#' @param transform.type  {'affine'}, required
+#'     transformation type
+#' @param sampler.type  {'bilinear'}, required
+#'     sampling type
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.SpatialTransformer <- function(...) {
+  mx.varg.symbol.SpatialTransformer(list(...))
+}
+
+#' Apply swapaxis to input.
+#' 
+#' @param data  Symbol
+#'     Input data to the SwapAxisOp.
+#' @param dim1  int (non-negative), optional, default=0
+#'     the first axis to be swapped.
+#' @param dim2  int (non-negative), optional, default=0
+#'     the second axis to be swapped.
+#' @param name  string, optional
+#'     Name of the resulting symbo
