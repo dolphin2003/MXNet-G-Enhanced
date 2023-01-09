@@ -840,4 +840,191 @@ mx.symbol.Flatten <- function(...) {
 #' @param data  Symbol
 #'     Input data to the FullyConnectedOp.
 #' @param weight  Symbol
-#'     Weight matr
+#'     Weight matrix.
+#' @param bias  Symbol
+#'     Bias parameter.
+#' @param num.hidden  int, required
+#'     Number of hidden nodes of the output.
+#' @param no.bias  boolean, optional, default=False
+#'     Whether to disable bias parameter.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.FullyConnected <- function(...) {
+  mx.varg.symbol.FullyConnected(list(...))
+}
+
+#' Apply a sparse regularization to the output a sigmoid activation function.
+#' 
+#' @param data  Symbol
+#'     Input data.
+#' @param sparseness.target  float, optional, default=0.1
+#'     The sparseness target
+#' @param penalty  float, optional, default=0.001
+#'     The tradeoff parameter for the sparseness penalty
+#' @param momentum  float, optional, default=0.9
+#'     The momentum for running average
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.IdentityAttachKLSparseReg <- function(...) {
+  mx.varg.symbol.IdentityAttachKLSparseReg(list(...))
+}
+
+#' Set the l2 norm of each instance to a constant.
+#' 
+#' @param data  Symbol
+#'     Input data to the L2NormalizationOp.
+#' @param eps  float, optional, default=1e-10
+#'     Epsilon to prevent div 0
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.L2Normalization <- function(...) {
+  mx.varg.symbol.L2Normalization(list(...))
+}
+
+#' Apply convolution to input then add a bias.
+#' 
+#' @param data  Symbol
+#'     Input data to the ConvolutionOp.
+#' @param alpha  float, optional, default=0.0001
+#'     value of the alpha variance scaling parameter in the normalization formula
+#' @param beta  float, optional, default=0.75
+#'     value of the beta power parameter in the normalization formula
+#' @param knorm  float, optional, default=2
+#'     value of the k parameter in normalization formula
+#' @param nsize  int (non-negative), required
+#'     normalization window width in elements.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.LRN <- function(...) {
+  mx.varg.symbol.LRN(list(...))
+}
+
+#' Apply activation function to input.
+#' 
+#' @param data  Symbol
+#'     Input data to activation function.
+#' @param act.type  {'elu', 'leaky', 'prelu', 'rrelu'},optional, default='leaky'
+#'     Activation function to be applied.
+#' @param slope  float, optional, default=0.25
+#'     Init slope for the activation. (For leaky and elu only)
+#' @param lower.bound  float, optional, default=0.125
+#'     Lower bound of random slope. (For rrelu only)
+#' @param upper.bound  float, optional, default=0.334
+#'     Upper bound of random slope. (For rrelu only)
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.LeakyReLU <- function(...) {
+  mx.varg.symbol.LeakyReLU(list(...))
+}
+
+#' Use linear regression for final output, this is used on final output of a net.
+#' 
+#' @param data  Symbol
+#'     Input data to function.
+#' @param label  Symbol
+#'     Input label to function.
+#' @param grad.scale  float, optional, default=1
+#'     Scale the gradient by a float factor
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.LinearRegressionOutput <- function(...) {
+  mx.varg.symbol.LinearRegressionOutput(list(...))
+}
+
+#' Use Logistic regression for final output, this is used on final output of a net.
+#' Logistic regression is suitable for binary classification or probability prediction tasks.
+#' 
+#' @param data  Symbol
+#'     Input data to function.
+#' @param label  Symbol
+#'     Input label to function.
+#' @param grad.scale  float, optional, default=1
+#'     Scale the gradient by a float factor
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.LogisticRegressionOutput <- function(...) {
+  mx.varg.symbol.LogisticRegressionOutput(list(...))
+}
+
+#' Use mean absolute error regression for final output, this is used on final output of a net.
+#' 
+#' @param data  Symbol
+#'     Input data to function.
+#' @param label  Symbol
+#'     Input label to function.
+#' @param grad.scale  float, optional, default=1
+#'     Scale the gradient by a float factor
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.MAERegressionOutput <- function(...) {
+  mx.varg.symbol.MAERegressionOutput(list(...))
+}
+
+#' Get output from a symbol and pass 1 gradient back. This is used as a terminal loss if unary and binary operator are used to composite a loss with no declaration of backward dependency
+#' 
+#' @param data  Symbol
+#'     Input data.
+#' @param grad.scale  float, optional, default=1
+#'     gradient scale as a supplement to unary and binary operators
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.MakeLoss <- function(...) {
+  mx.varg.symbol.MakeLoss(list(...))
+}
+
+#' Perform spatial pooling on inputs.
+#' 
+#' @param data  Symbol
+#'     Input data to the pooling operator.
+#' @param global.pool  boolean, optional, default=False
+#'     Ignore kernel size, do global pooling based on current input feature map. This is useful for input with different shape
+#' @param kernel  Shape(tuple), required
+#'     pooling kernel size: (y, x)
+#' @param pool.type  {'avg', 'max', 'sum'}, required
+#'     Pooling type to be applied.
+#' @param stride  Shape(tuple), optional, default=(1,1)
+#'     stride: for pooling (y, x)
+#' @param pad  Shape(tuple), optional, default=(0,0)
+#'     pad for pooling: (y, x)
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.Pooling <- function(...) {
+  mx.varg.symbol.Pooling(list(...))
+}
+
+#' Performs region-of-interest pooling on inputs. Resize bounding box coordinates by spatial_scale and crop input feature maps accordingly. The cropped feature maps are pooled by max pooling to a fixed size output indicated by pooled_size. batch_size will change to the number of region bounding boxes after ROIPooling
+#' 
+#' @param data  Symbol
+#'     Input data to the pooling operator, a 4D Feature maps
+#' @param rois  Symbol
+#'     Bounding box coordinates, a 2D array of [[batch_index, x1, y1, x2, y2]]. (x1, y1) and (x2, y2) are top left and down right corners of designated region of interest. batch_index indicates the index of corresponding
