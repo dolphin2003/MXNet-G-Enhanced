@@ -1170,4 +1170,226 @@ mx.symbol.SpatialTransformer <- function(...) {
 #' @param dim2  int (non-negative), optional, default=0
 #'     the second axis to be swapped.
 #' @param name  string, optional
-#'     Name of the resulting symbo
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.SwapAxis <- function(...) {
+  mx.varg.symbol.SwapAxis(list(...))
+}
+
+#' Perform nearest neighboor/bilinear up sampling to inputs
+#' 
+#' @param data  Symbol[]
+#'     Array of tensors to upsample
+#' @param scale  int (non-negative), required
+#'     Up sampling scale
+#' @param num.filter  int (non-negative), optional, default=0
+#'     Input filter. Only used by nearest sample_type.
+#' @param sample.type  {'bilinear', 'nearest'}, required
+#'     upsampling method
+#' @param multi.input.mode  {'concat', 'sum'},optional, default='concat'
+#'     How to handle multiple input. concat means concatenate upsampled images along the channel dimension. sum means add all images together, only available for nearest neighbor upsampling.
+#' @param num.args  int, required
+#'     Number of inputs to be upsampled. For nearest neighbor upsampling, this can be 1-N; the size of output will be(scale*h_0,scale*w_0) and all other inputs will be upsampled to thesame size. For bilinear upsampling this must be 2; 1 input and 1 weight.
+#' @param workspace  long (non-negative), optional, default=512
+#'     Tmp workspace for deconvolution (MB)
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.UpSampling <- function(...) {
+  mx.varg.symbol.UpSampling(list(...))
+}
+
+#' Take absolute value of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.abs <- function(...) {
+  mx.varg.symbol.abs(list(...))
+}
+
+#' Calculate batched dot product of two matrices. (batch, M, K) batch_dot (batch, K, N) --> (batch, M, N)
+#' 
+#' @param lhs  Symbol
+#'     Left symbolic input to the function
+#' @param rhs  Symbol
+#'     Right symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.batch_dot <- function(...) {
+  mx.varg.symbol.batch_dot(list(...))
+}
+
+#' Broadcast data in the given axis to the given size. The original size of the broadcasting axis must be 1.
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param axis  Shape(tuple), optional, default=()
+#'     The axes to perform the broadcasting.
+#' @param size  Shape(tuple), optional, default=()
+#'     Target sizes of the broadcasting axes.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.broadcast_axis <- function(...) {
+  mx.varg.symbol.broadcast_axis(list(...))
+}
+
+#' lhs divide rhs with broadcast
+#' 
+#' @param lhs  Symbol
+#'     Left symbolic input to the function
+#' @param rhs  Symbol
+#'     Right symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.broadcast_div <- function(...) {
+  mx.varg.symbol.broadcast_div(list(...))
+}
+
+#' lhs minus rhs with broadcast
+#' 
+#' @param lhs  Symbol
+#'     Left symbolic input to the function
+#' @param rhs  Symbol
+#'     Right symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.broadcast_minus <- function(...) {
+  mx.varg.symbol.broadcast_minus(list(...))
+}
+
+#' lhs multiple rhs with broadcast
+#' 
+#' @param lhs  Symbol
+#'     Left symbolic input to the function
+#' @param rhs  Symbol
+#'     Right symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.broadcast_mul <- function(...) {
+  mx.varg.symbol.broadcast_mul(list(...))
+}
+
+#' lhs add rhs with broadcast
+#' 
+#' @param lhs  Symbol
+#'     Left symbolic input to the function
+#' @param rhs  Symbol
+#'     Right symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.broadcast_plus <- function(...) {
+  mx.varg.symbol.broadcast_plus(list(...))
+}
+
+#' lhs power rhs with broadcast
+#' 
+#' @param lhs  Symbol
+#'     Left symbolic input to the function
+#' @param rhs  Symbol
+#'     Right symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.broadcast_power <- function(...) {
+  mx.varg.symbol.broadcast_power(list(...))
+}
+
+#' Broadcast data to the target shape. The original size of the broadcasting axis must be 1.
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param shape  Shape(tuple), optional, default=()
+#'     The shape of the desired array. We can set the dim to zero if it's same as the original. E.g `A = broadcast_to(B, shape=(10, 0, 0))` has the same meaning as `A = broadcast_axis(B, axis=0, size=10)`.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.broadcast_to <- function(...) {
+  mx.varg.symbol.broadcast_to(list(...))
+}
+
+#' Take ceil value of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.ceil <- function(...) {
+  mx.varg.symbol.ceil(list(...))
+}
+
+#' Take cos of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.cos <- function(...) {
+  mx.varg.symbol.cos(list(...))
+}
+
+#' Calculate dot product of two matrices or two vectors
+#' 
+#' @param lhs  Symbol
+#'     Left symbolic input to the function
+#' @param rhs  Symbol
+#'     Right symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.dot <- function(...) {
+  mx.varg.symbol.dot(list(...))
+}
+
+#' Take exp of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.exp <- function(...) {
+  mx.varg.symbol.exp(list(...))
+}
+
+#' Expand the s
