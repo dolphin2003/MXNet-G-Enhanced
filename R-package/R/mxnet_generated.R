@@ -1392,4 +1392,245 @@ mx.symbol.exp <- function(...) {
   mx.varg.symbol.exp(list(...))
 }
 
-#' Expand the s
+#' Expand the shape of array by inserting a new axis.
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param axis  int (non-negative), required
+#'     Position (amongst axes) where new axis is to be inserted.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.expand_dims <- function(...) {
+  mx.varg.symbol.expand_dims(list(...))
+}
+
+#' Take floor value of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.floor <- function(...) {
+  mx.varg.symbol.floor(list(...))
+}
+
+#' Take log of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.log <- function(...) {
+  mx.varg.symbol.log(list(...))
+}
+
+#' Sample a normal distribution
+#' 
+#' @param loc  float, optional, default=0
+#'     Mean of the distribution.
+#' @param scale  float, optional, default=1
+#'     Standard deviation of the distribution.
+#' @param shape  Shape(tuple), required
+#'     The shape of the output
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.normal <- function(...) {
+  mx.varg.symbol.normal(list(...))
+}
+
+#' Take round value of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.round <- function(...) {
+  mx.varg.symbol.round(list(...))
+}
+
+#' Take rsqrt of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.rsqrt <- function(...) {
+  mx.varg.symbol.rsqrt(list(...))
+}
+
+#' Take sign value of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.sign <- function(...) {
+  mx.varg.symbol.sign(list(...))
+}
+
+#' Take sin of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.sin <- function(...) {
+  mx.varg.symbol.sin(list(...))
+}
+
+#' Slice the input along certain axis and return a sliced array.
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param axis  int, required
+#'     The axis to be sliced
+#' @param begin  int, required
+#'     The beginning index to be sliced
+#' @param end  int, required
+#'     The end index to be sliced
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.slice_axis <- function(...) {
+  mx.varg.symbol.slice_axis(list(...))
+}
+
+#' Calculate Smooth L1 Loss(lhs, scalar)
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.smooth_l1 <- function(...) {
+  mx.varg.symbol.smooth_l1(list(...))
+}
+
+#' Calculate cross_entropy(lhs, one_hot(rhs))
+#' 
+#' @param lhs  Symbol
+#'     Left symbolic input to the function
+#' @param rhs  Symbol
+#'     Right symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.softmax_cross_entropy <- function(...) {
+  mx.varg.symbol.softmax_cross_entropy(list(...))
+}
+
+#' Take sqrt of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.sqrt <- function(...) {
+  mx.varg.symbol.sqrt(list(...))
+}
+
+#' Take square of the src
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.square <- function(...) {
+  mx.varg.symbol.square(list(...))
+}
+
+#' Take sum of the src in the given axis and returns a NDArray. Follows numpy semantics.
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param axis  Shape(tuple), optional, default=()
+#'     Same as Numpy. The axes to perform the reduction.If left empty, a global reduction will be performed.
+#' @param keepdims  boolean, optional, default=False
+#'     Same as Numpy. If keepdims is set to true, the axis which is reduced is left in the result as dimension with size one.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.sum <- function(...) {
+  mx.varg.symbol.sum(list(...))
+}
+
+#' (Depreciated! Use sum instead!) Take sum of the src in the given axis and returns a NDArray. Follows numpy semantics.
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param axis  Shape(tuple), optional, default=()
+#'     Same as Numpy. The axes to perform the reduction.If left empty, a global reduction will be performed.
+#' @param keepdims  boolean, optional, default=False
+#'     Same as Numpy. If keepdims is set to true, the axis which is reduced is left in the result as dimension with size one.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.sum_axis <- function(...) {
+  mx.varg.symbol.sum_axis(list(...))
+}
+
+#' Transpose the input matrix and return a new one
+#' 
+#' @param src  Symbol
+#'     Left symbolic input to the function
+#' @param axes  Shape(tuple), optional, default=()
+#'     Target axis order. By default the axes will be inverted.
+#' @param name  string, optional
+#'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.transpose <- function(...) {
+  mx.varg.symbol.transpose(list(...))
+}
+
+#' Sample a uniform distribution
+#' 
+#' @param low  float, optional, default=0
+#'     The lower bound of distribution
+#' @param high  float, optional, default=1
+#'     The upper bound of distribution
+#' @param shape  Shape(tuple), required
+#'     The shape of the output
+#' @param name  string, optional
+#'     Name of the resulting symbol.
