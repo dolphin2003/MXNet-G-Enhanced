@@ -1634,3 +1634,9 @@ mx.symbol.transpose <- function(...) {
 #'     The shape of the output
 #' @param name  string, optional
 #'     Name of the resulting symbol.
+#' @return out The result mx.symbol
+#' 
+#' @export
+mx.symbol.uniform <- function(...) {
+  mx.varg.symbol.uniform(list(...))
+}
