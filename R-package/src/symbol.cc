@@ -289,4 +289,68 @@ SEXP SymbolFunction::operator() (SEXP* args) {
       &shandle));
   Symbol::RObjectType ret = Symbol::RObject(shandle);
   Rcpp::List compose_args = Rcpp::wrap(sym_vals);
-  compo
+  compose_args.names() = sym_keys;
+  name = NameManager::Get()->GetName(name, name_hint_);
+  Symbol::XPtr(ret)->Compose(compose_args, name);
+  return ret;
+  END_RCPP;
+}
+
+void Symbol::InitRcppModule() {
+  using namespace Rcpp;  // NOLINT(*)
+  class_<Symbol>("MXSymbol")
+      .method("debug.str", &Symbol::DebugStr,
+              "Return the debug string of internals of symbol")
+      .method("apply", &Symbol::Apply,
+              "Return a new Symbol by applying current symbols into input")
+      .method("as.json", &Symbol::AsJSON,
+              "Return a json string representation of symbol")
+      .method("save", &Symbol::Save,
+              "Save symbol to file")
+      .property("arguments", &Symbol::ListArguments,
+              "List the arguments names of the symbol")
+      .property("outputs", &Symbol::ListOuputs,
+              "List the outputs names of the symbol")
+      .property("auxiliary.states", &Symbol::ListAuxiliaryStates,
+              "List the auxiliary state names of the symbol")
+      .method("get.internals", &Symbol::GetInternals,
+              "Get a symbol that contains all the internals")
+      .method("get.output", &Symbol::GetOutput,
+              "Get index-th output symbol of current one")
+      .method("[[", &Symbol::GetOutput,
+              "Get index-th output symbol of current one")
+      .method("infer.shape", &Symbol::InferShape,
+              "Inference the shape information given unknown ones");
+
+  function("mx.symbol.Variable",
+           &Symbol::Variable,
+           List::create(_["name"]),
+           "Create a symbolic variable with specified name.");
+  function("mx.symbol.load",
+           &Symbol::Load,
+           List::create(_["file.name"]),
+           "Load a symbol from file.");
+  function("mx.symbol.load.json",
+           &Symbol::LoadJSON,
+           List::create(_["json.str"]),
+           "Load a symbol from json string.");
+  function("mx.varg.symbol.internal.Group",
+           &Symbol::Group,
+           List::create(_["slist"]),
+           "Create a symbol that groups symbols together.");
+}
+
+void SymbolFunction::InitRcppModule() {
+  Rcpp::Module* scope = ::getCurrentScope();
+  RCHECK(scope != nullptr)
+      << "Init Module need to be called inside scope";
+  mx_uint out_size;
+  AtomicSymbolCreator *arr;
+  MX_CALL(MXSymbolListAtomicSymbolCreators(&out_size, &arr));
+  for (int i = 0; i < out_size; ++i) {
+    SymbolFunction *f = new SymbolFunction(arr[i]);
+    scope->Add(f->get_name(), f);
+  }
+}
+}  // namespace R
+}  // namespace mxnet
