@@ -96,4 +96,197 @@ void Symbol::Save(const std::string& fname) const {
 }
 
 std::string Symbol::AsJSON() const {
-  con
+  const char *json;
+  MX_CALL(MXSymbolSaveToJSON(handle_, &json));
+  return json;
+}
+
+Symbol::RObjectType Symbol::GetInternals() const {
+  SymbolHandle out;
+  MX_CALL(MXSymbolGetInternals(handle_, &out));
+  return Symbol::RObject(out);
+}
+
+Symbol::RObjectType Symbol::GetOutput(mx_uint index) const {
+  SymbolHandle out;
+  MX_CALL(MXSymbolGetOutput(handle_, index - 1, &out));
+  return Symbol::RObject(out);
+}
+
+// helper function to convert shape into Rcpp vector
+inline Rcpp::List BuildShapeData(mx_uint shape_size,
+                                 const mx_uint *shape_ndim,
+                                 const mx_uint **shape_data,
+                                 const std::vector<std::string> &names) {
+  Rcpp::List ret(shape_size);
+  for (mx_uint i = 0; i < shape_size; ++i) {
+    Rcpp::IntegerVector dim(shape_data[i], shape_data[i] + shape_ndim[i]);
+    std::reverse(dim.begin(), dim.end());
+    ret[i] = dim;
+  }
+  ret.names() = names;
+  return ret;
+}
+
+SEXP Symbol::InferShape(const Rcpp::List& kwargs) const {
+  RCHECK(HasName(kwargs))
+      << "Need to pass parameters in key=value style.\n";
+  std::vector<std::string> keys = kwargs.names();
+  std::vector<mx_uint> arg_ind_ptr(1, 0);
+  std::vector<mx_uint> arg_shape_data;
+
+  for (size_t i = 0; i < kwargs.size(); ++i) {
+    RCHECK(keys[i].length() != 0)
+      << "Need to pass parameters in key=value style.\n";
+    std::vector<mx_uint> dim = Dim2InternalShape(kwargs[i]);
+    arg_shape_data.insert(arg_shape_data.end(), dim.begin(), dim.end());
+    arg_ind_ptr.push_back(static_cast<mx_uint>(arg_shape_data.size()));
+  }
+  std::vector<const char*> c_keys = CKeys(keys);
+
+  mx_uint in_shape_size;
+  const mx_uint *in_shape_ndim;
+  const mx_uint **in_shape_data;
+  mx_uint out_shape_size;
+  const mx_uint *out_shape_ndim;
+  const mx_uint **out_shape_data;
+  mx_uint aux_shape_size;
+  const mx_uint *aux_shape_ndim;
+  const mx_uint **aux_shape_data;
+  int complete;
+
+  MX_CALL(MXSymbolInferShape(
+      handle_, static_cast<mx_uint>(kwargs.size()), dmlc::BeginPtr(c_keys),
+      dmlc::BeginPtr(arg_ind_ptr), dmlc::BeginPtr(arg_shape_data),
+      &in_shape_size, &in_shape_ndim, &in_shape_data,
+      &out_shape_size, &out_shape_ndim, &out_shape_data,
+      &aux_shape_size, &aux_shape_ndim, &aux_shape_data,
+      &complete));
+
+  if (complete != 0) {
+    return Rcpp::List::create(
+        Rcpp::Named("arg.shapes") = BuildShapeData(
+            in_shape_size, in_shape_ndim, in_shape_data, ListArguments()),
+        Rcpp::Named("out.shapes") = BuildShapeData(
+            out_shape_size, out_shape_ndim, out_shape_data, ListOuputs()),
+        Rcpp::Named("aux.shapes") = BuildShapeData(
+            aux_shape_size, aux_shape_ndim, aux_shape_data, ListAuxiliaryStates()));
+  } else {
+    return R_NilValue;
+  }
+}
+
+Symbol::RObjectType Symbol::Variable(const std::string& name) {
+  SymbolHandle out;
+  MX_CALL(MXSymbolCreateVariable(name.c_str(), &out));
+  return Symbol::RObject(out);
+}
+
+Symbol::RObjectType Symbol::Load(const std::string& filename) {
+  SymbolHandle out;
+  MX_CALL(MXSymbolCreateFromFile(filename.c_str(), &out));
+  return Symbol::RObject(out);
+}
+
+Symbol::RObjectType Symbol::LoadJSON(const std::string& json) {
+  SymbolHandle out;
+  MX_CALL(MXSymbolCreateFromJSON(json.c_str(), &out));
+  return Symbol::RObject(out);
+}
+
+Symbol::RObjectType Symbol::Group(const Rcpp::List& symbols) {
+  // allow pass in single list
+  Rcpp::List kwargs = symbols;
+  if (symbols.size() == 1 && Rcpp::is<Rcpp::List>(symbols[0])) {
+    kwargs = symbols[0];
+  }
+
+  std::vector<SymbolHandle> handles(kwargs.size());
+  for (size_t i = 0; i < kwargs.size(); ++i) {
+    RCHECK(Rcpp::is<Symbol>(kwargs[i]))
+        << "Group only accept MXSymbol as input\n";
+    handles[i] = Symbol::XPtr(kwargs[i])->handle_;
+  }
+  SymbolHandle out;
+  MX_CALL(MXSymbolCreateGroup(static_cast<mx_uint>(handles.size()),
+                              dmlc::BeginPtr(handles), &out));
+  return Symbol::RObject(out);
+}
+
+SymbolFunction::SymbolFunction(AtomicSymbolCreator handle)
+    : handle_(handle) {
+  const char* name;
+  const char* description;
+  mx_uint num_args;
+  const char **arg_names;
+  const char **arg_type_infos;
+  const char **arg_descriptions;
+  const char *key_var_num_args;
+  const char *ret_type;
+
+  MX_CALL(MXSymbolGetAtomicSymbolInfo(
+      handle_, &name, &description, &num_args,
+      &arg_names, &arg_type_infos, &arg_descriptions,
+      &key_var_num_args, &ret_type));
+  if (key_var_num_args != nullptr) {
+    key_var_num_args_ = key_var_num_args;
+  }
+  name_hint_ = name;
+  std::transform(name_hint_.begin(), name_hint_.end(),
+                 name_hint_.begin(), ::tolower);
+  if (name[0] == '_') {
+    name_ = std::string("mx.varg.symbol.internal.") + (name + 1);
+  } else {
+    name_ = std::string("mx.varg.symbol.") + name;
+  }
+  std::ostringstream os;
+  os << description << "\n\n"
+     << MakeDocString(num_args, arg_names, arg_type_infos, arg_descriptions)
+     << "@param name  string, optional\n"
+     << "    Name of the resulting symbol.\n"
+     << "@return out The result mx.symbol\n\n"
+     << "@export\n";
+  this->docstring = os.str();
+}
+
+SEXP SymbolFunction::operator() (SEXP* args) {
+  BEGIN_RCPP;
+  Rcpp::List kwargs(args[0]);
+  std::vector<std::string> keys = SafeGetListNames(kwargs);
+  // string key and values
+  std::vector<std::string> str_keys;
+  std::vector<std::string> str_vals;
+  // symbol key and values
+  std::vector<std::string> sym_keys;
+  std::vector<Rcpp::RObject> sym_vals;
+  // name of the result
+  std::string name;
+
+  // classify keys
+  for (size_t i = 0; i < kwargs.size(); ++i) {
+    if (keys[i] == "name") {
+      name = Rcpp::as<std::string>(kwargs[i]);
+      continue;
+    }
+    if (!isSimple(kwargs[i]) && Rcpp::is<Symbol>(kwargs[i])) {
+      sym_keys.push_back(keys[i]);
+      sym_vals.push_back(kwargs[i]);
+    } else {
+      RCHECK(keys[i].length() != 0)
+          << "Non Symbol parameters is only accepted via key=value style.";
+      str_keys.push_back(FormatParamKey(keys[i]));
+      str_vals.push_back(toPyString(keys[i], kwargs[i]));
+    }
+  }
+
+  SymbolHandle shandle;
+  std::vector<const char*> c_str_keys = CKeys(str_keys);
+  std::vector<const char*> c_str_vals = CKeys(str_vals);
+  MX_CALL(MXSymbolCreateAtomicSymbol(
+      handle_, static_cast<mx_uint>(str_keys.size()),
+      dmlc::BeginPtr(c_str_keys),
+      dmlc::BeginPtr(c_str_vals),
+      &shandle));
+  Symbol::RObjectType ret = Symbol::RObject(shandle);
+  Rcpp::List compose_args = Rcpp::wrap(sym_vals);
+  compo
