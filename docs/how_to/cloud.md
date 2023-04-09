@@ -138,4 +138,15 @@ Note: Sometimes the jobs lingers at the slave machines even we pressed `Ctrl-c`
 at the root node. We can kill them by
 
 ```bash
-cat hosts | xargs -I{} ssh -o St
+cat hosts | xargs -I{} ssh -o StrictHostKeyChecking=no {} 'uname -a; pgrep python | xargs kill -9'
+```
+
+Note: The above example is quite simple to train and therefore is not a good
+benchmark for the distributed training. We may consider other [examples](https://github.com/dmlc/mxnet/tree/master/example/image-classification).
+
+### More NOTE
+#### Use multiple data shards
+It is common to pack a dataset into multiple files, especially when working in a distributed environment. MXNet supports direct loading from multiple data shards. Simply put all the record files into a folder, and point the data path to the folder.
+
+#### Use YARN, MPI, SGE
+While ssh can be simple for cases when we do not have a cluster scheduling framework. MXNet is designed to be able to port to various platforms.  We also provide other scripts in [tracker](https://github.com/dmlc/dmlc-core/tree/master/tracker) to run on other cluster frameworks, including Hadoop(YARN) and SGE. Your contribution is more than welcomed to provide examples to run mxnet on your favorite distributed platform.
