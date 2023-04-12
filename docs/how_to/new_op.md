@@ -40,4 +40,53 @@ Then we do the same for backward:
         l = in_data[1].asnumpy().ravel().astype(np.int)
         y = out_data[0].asnumpy()
         y[np.arange(l.shape[0]), l] -= 1.0
-        self.assign(in_grad[0
+        self.assign(in_grad[0], req[0], mx.nd.array(y))
+```
+
+Softmax defines the computation of our custom operator, but we still need to define it's input/output format by subclassing mx.operator.CustomOpProp.
+First we register our new operator with the name 'softmax':
+```python
+@mx.operator.register("softmax")
+class SoftmaxProp(mx.operator.CustomOpProp):
+```
+Then we call our base constructor with `need_top_grad=False` because softmax is a loss layer and we don't need gradient input from layers above:
+```python
+    def __init__(self):
+        super(SoftmaxProp, self).__init__(need_top_grad=False)
+```
+
+Then we declare our input and output
+```python
+    def list_arguments(self):
+        return ['data', 'label']
+
+    def list_outputs(self):
+        return ['output']
+```
+Note that list arguments declares both input and parameter and we recommend ordering them as `['input1', 'input2', ... , 'weight1', 'weight2', ...]`
+
+Next we need to provide `infer_shape` to declare the shape of our output/weight and check the consistency of our input shapes:
+```python
+    def infer_shape(self, in_shape):
+        data_shape = in_shape[0]
+        label_shape = (in_shape[0][0],)
+        output_shape = in_shape[0]
+        return [data_shape, label_shape], [output_shape], []
+```
+The first dim of an input/output tensor is batch size. Our label is a set of integers, one for each data entry, and our output has the same shape as input. Infer_shape should always return three lists in the order inputs, outputs and auxiliary states (which we don't have here), even if one of them is empty.
+
+Finally, we need to define a create_operator function that will be called by the backend to create an instance of Softmax:
+```python
+    def create_operator(self, ctx, shapes, dtypes):
+        return Softmax()
+```
+
+To use your custom operator, create a mx.sym.Custom symbol with op_type being the registered name:
+```python
+mlp = mx.symbol.Custom(data=fc3, name='softmax', op_type='softmax')
+```
+
+The complete code for this example can be found at `examples/numpy-ops/custom_softmax.py`
+
+## C++/MShadow(CUDA)
+Please refer to [Developer Guide - SimpleOp](../system/operator_util.md) and [Developer Guide - Operators](https://mxnet.readthedocs.org/en/latest/system/operator.html) for detail.
