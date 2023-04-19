@@ -167,4 +167,173 @@ dim(preds)
 ## [1]    10 28000
 ```
 
-It is a matrix with 28000 rows and 10 cols, containing the desired classification probabilities from the output layer. To extract the maximum label for each row, we can
+It is a matrix with 28000 rows and 10 cols, containing the desired classification probabilities from the output layer. To extract the maximum label for each row, we can use the `max.col` in R:
+
+
+```r
+pred.label <- max.col(t(preds)) - 1
+table(pred.label)
+```
+
+```
+## pred.label
+##    0    1    2    3    4    5    6    7    8    9
+## 2818 3195 2744 2767 2683 2596 2798 2790 2784 2825
+```
+
+With a little extra effort in the csv format, we can have our submission to the competition!
+
+
+```r
+submission <- data.frame(ImageId=1:ncol(test), Label=pred.label)
+write.csv(submission, file='submission.csv', row.names=FALSE, quote=FALSE)
+```
+
+## LeNet
+
+Next we are going to introduce a new network structure: [LeNet](http://yann.lecun.com/exdb/lenet/). It is proposed by Yann LeCun to recognize handwritten digits. Now we are going to demonstrate how to construct and train an LeNet in `mxnet`.
+
+First we construct the network:
+
+
+```r
+# input
+data <- mx.symbol.Variable('data')
+# first conv
+conv1 <- mx.symbol.Convolution(data=data, kernel=c(5,5), num_filter=20)
+tanh1 <- mx.symbol.Activation(data=conv1, act_type="tanh")
+pool1 <- mx.symbol.Pooling(data=tanh1, pool_type="max",
+                          kernel=c(2,2), stride=c(2,2))
+# second conv
+conv2 <- mx.symbol.Convolution(data=pool1, kernel=c(5,5), num_filter=50)
+tanh2 <- mx.symbol.Activation(data=conv2, act_type="tanh")
+pool2 <- mx.symbol.Pooling(data=tanh2, pool_type="max",
+                          kernel=c(2,2), stride=c(2,2))
+# first fullc
+flatten <- mx.symbol.Flatten(data=pool2)
+fc1 <- mx.symbol.FullyConnected(data=flatten, num_hidden=500)
+tanh3 <- mx.symbol.Activation(data=fc1, act_type="tanh")
+# second fullc
+fc2 <- mx.symbol.FullyConnected(data=tanh3, num_hidden=10)
+# loss
+lenet <- mx.symbol.SoftmaxOutput(data=fc2)
+```
+
+Then let us reshape the matrices into arrays:
+
+
+```r
+train.array <- train.x
+dim(train.array) <- c(28, 28, 1, ncol(train.x))
+test.array <- test
+dim(test.array) <- c(28, 28, 1, ncol(test))
+```
+
+Next we are going to compare the training speed on different devices, so the definition of the devices goes first:
+
+
+```r
+n.gpu <- 1
+device.cpu <- mx.cpu()
+device.gpu <- lapply(0:(n.gpu-1), function(i) {
+  mx.gpu(i)
+})
+```
+
+As you can see, we can pass a list of devices, to ask mxnet to train on multiple GPUs (you can do similar thing for cpu,
+but since internal computation of cpu is already multi-threaded, there is less gain than using GPUs).
+
+We start by training on CPU first. Because it takes a bit time to do so, we will only run it for one iteration.
+
+
+```r
+mx.set.seed(0)
+tic <- proc.time()
+model <- mx.model.FeedForward.create(lenet, X=train.array, y=train.y,
+                                     ctx=device.cpu, num.round=1, array.batch.size=100,
+                                     learning.rate=0.05, momentum=0.9, wd=0.00001,
+                                     eval.metric=mx.metric.accuracy,
+                                     epoch.end.callback=mx.callback.log.train.metric(100))
+```
+
+```
+## Start training with 1 devices
+## Batch [100] Train-accuracy=0.1066
+## Batch [200] Train-accuracy=0.16495
+## Batch [300] Train-accuracy=0.401766666666667
+## Batch [400] Train-accuracy=0.537675
+## [1] Train-accuracy=0.557136038186157
+```
+
+```r
+print(proc.time() - tic)
+```
+
+```
+##    user  system elapsed
+## 130.030 204.976  83.821
+```
+
+Training on GPU:
+
+
+```r
+mx.set.seed(0)
+tic <- proc.time()
+model <- mx.model.FeedForward.create(lenet, X=train.array, y=train.y,
+                                     ctx=device.gpu, num.round=5, array.batch.size=100,
+                                     learning.rate=0.05, momentum=0.9, wd=0.00001,
+                                     eval.metric=mx.metric.accuracy,
+                                     epoch.end.callback=mx.callback.log.train.metric(100))
+```
+
+```
+## Start training with 1 devices
+## Batch [100] Train-accuracy=0.1066
+## Batch [200] Train-accuracy=0.1596
+## Batch [300] Train-accuracy=0.3983
+## Batch [400] Train-accuracy=0.533975
+## [1] Train-accuracy=0.553532219570405
+## Batch [100] Train-accuracy=0.958
+## Batch [200] Train-accuracy=0.96155
+## Batch [300] Train-accuracy=0.966100000000001
+## Batch [400] Train-accuracy=0.968550000000003
+## [2] Train-accuracy=0.969071428571432
+## Batch [100] Train-accuracy=0.977
+## Batch [200] Train-accuracy=0.97715
+## Batch [300] Train-accuracy=0.979566666666668
+## Batch [400] Train-accuracy=0.980900000000003
+## [3] Train-accuracy=0.981309523809527
+## Batch [100] Train-accuracy=0.9853
+## Batch [200] Train-accuracy=0.985899999999999
+## Batch [300] Train-accuracy=0.986966666666668
+## Batch [400] Train-accuracy=0.988150000000002
+## [4] Train-accuracy=0.988452380952384
+## Batch [100] Train-accuracy=0.990199999999999
+## Batch [200] Train-accuracy=0.98995
+## Batch [300] Train-accuracy=0.990600000000001
+## Batch [400] Train-accuracy=0.991325000000002
+## [5] Train-accuracy=0.991523809523812
+```
+
+```r
+print(proc.time() - tic)
+```
+
+```
+##    user  system elapsed
+##   9.288   1.680   6.889
+```
+
+As you can see by using GPU, we can get a much faster speedup in training!
+Finally we can submit the result to Kaggle again to see the improvement of our ranking!
+
+
+```r
+preds <- predict(model, test.array)
+pred.label <- max.col(t(preds)) - 1
+submission <- data.frame(ImageId=1:ncol(test), Label=pred.label)
+write.csv(submission, file='submission.csv', row.names=FALSE, quote=FALSE)
+```
+
+![](../../web-data/mxnet/knitr/mnistCompetition-kaggle-submission.png)
