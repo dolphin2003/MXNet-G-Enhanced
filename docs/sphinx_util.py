@@ -24,4 +24,11 @@ else:
 
 curr_path = os.path.dirname(os.path.abspath(os.path.expanduser(__file__)))
 root_path = os.path.join(curr_path, '..')
-run_build_mxne
+run_build_mxnet(root_path)
+
+sys.path.insert(0, os.path.abspath('../recommonmark/'))
+
+from recommonmark import parser, transform
+
+MarkdownParser = parser.CommonMarkParser
+AutoStructify = transform.AutoStructify
