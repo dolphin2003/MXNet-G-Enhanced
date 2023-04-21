@@ -277,4 +277,43 @@ on each device.
 
 This running policy is usually independent of dependency tracking, and can be separated out either as an independent module
 or virtual interface of base dependency tracking modules. Having a runtime policy that is fare to all operations and schedule
-smoothly is an interestin
+smoothly is an interesting systems problem itself.
+
+Discussions
+-----------
+We should emphasize that the designs mentioned in this article is not the only solution to the dependency tracking problem,
+but is an example on how things can be done. There are several design choices that are debatable.
+We will discuss some of of them here.
+
+### Dynamic vs Static
+The dependency engine interface discussed in this article is somewhat dynamic.
+In a sense that user can push operations one by one, instead of declaring the entire dependency graph (static).
+The dynamic scheduling may mean more overhead than static declarations, in terms of data structure.
+However, it also enables more flexible patterns such as supporting auto parallelism for imperative programs
+or mixture of imperative and symbolic programs. Some level of pre-declared operations can also be added
+to the interface to enable data structure re-use.
+
+### Mutation vs Immutable
+The generic engine interface in this article support explicit scheduling for mutation.
+In normal dataflow engine, the data are usually immutable. Immutable data have a lot of good properties,
+for example, they are usually good for better parallelization, and easier fault tolerance in distributed setting via re-computation.
+
+However, making things purely immutable makes several things hard:
+- It is harder to schedule the resource contention problems such as random number and deletion.
+- The engine usually need to manage resources (memory, random number) to avoid conflictions.
+	- It is harder to plug in user allocated space etc.
+- No pre-allocated static memory, again because the usual pattern is write to a pre-allocated layer space,
+  which is not supported is data is immutable.
+
+The mutation semantics makes these issues easier. It is in lower level than a data flow engine, in a sense that if we
+allocate a new variable and memory for each operations, it can be used to schedule immutable operations.
+But it also makes things like random number generation easier as the operation is indeed mutation of state.
+
+Contribution to this Note
+-------------------------
+This note is part of our effort to [open-source system design notes](index.md)
+ for deep learning libraries. You are more welcomed to contribute to this Note, by submitting a pull request.
+
+### Source Code of the Generic Dependency Engine
+[MXNet](https://github.com/dmlc/mxnet) provides an implementation of generic dependency engine described in this article.
+You can find more descriptions in the [here](engine.md). You are also welcome to contribute to the code.
