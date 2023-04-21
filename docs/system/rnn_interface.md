@@ -33,4 +33,55 @@ If I understand correctly, when multiple RNN/LSTM layers are stacked, instead of
 
 The documentation for RNN in Lasagne can be found [here](http://lasagne.readthedocs.org/en/latest/modules/layers/recurrent.html). In Lasagne, a recurrent layer is just like standard layers, except that the input shape is expected to be `(batch_size, sequence_length, feature_dimension)`. The output shape is then `(batch_size, sequence_length, output_dimension)`.
 
-Both `batch_size
+Both `batch_size` and `sequence_length` are specified as `None`, and inferred from the data. Alternative, when memory is enough and the (maximum) sequence length is known a prior, the user can set `unroll_scan` to `False`. Then Lasagne will unroll the graph explicitly, instead of using Theano `scan` operator. Explicitly unrolling is implemented in [utils.py#unroll_scan](https://github.com/Lasagne/Lasagne/blob/master/lasagne/utils.py#L340).
+
+The recurrent layer also accept a `mask_input`, to support the case of variable length sequences (e.g. sequences could be of different length even within a mini-batch). The mask is of shape `(batch_size, sequence_length)`.
+
+### Keras
+
+The documentation for RNN in Keras can be found [here](http://keras.io/layers/recurrent/). The interface in Keras is similar to Lasagne. The input is expected to be of shape `(batch_size, sequence_length, feature_dimension)`, and the output shape (if `return_sequences` is `True`) is `(batch_size, sequence_length, feature_dimension)`.
+
+Keras currently supports both Theano and TensorFlow backend. RNN for the Theano backend is [implemented with the scan operator](https://github.com/fchollet/keras/blob/master/keras/backend/theano_backend.py#L432). For TensorFlow, it seem to be [implemented via explicitly unrolling](https://github.com/fchollet/keras/blob/master/keras/backend/tensorflow_backend.py#L396). The documentation says for TensorFlow backend, the sequence length must be specified a prior, and masking is currently not working (because `tf.reduce_any` is not functioning yet).
+
+## Torch
+
+[karpathy/char-rnn](https://github.com/karpathy/char-rnn) is implemented via [explicitly unrolling](https://github.com/karpathy/char-rnn/blob/master/model/RNN.lua#L15). [Element-Research/rnn](https://github.com/Element-Research/rnn), on the contrary, run the sequence iteration in Lua. It actually has a very modular design:
+
+* The basic RNN/LSTM modules only run *one* time step upon one call of `forward` (and accumulate / store necessary information to support backward computation if needed). So the users could have detailed control when using this API directly.
+* A collection of `Sequencer` are defined to model common scenarios like forward sequence, bi-directional sequence, attention models, etc.
+* Other utility modules like masking to support variable length sequences, etc.
+
+## CNTK
+
+CNTK looks quite different from other common deep learning libraries. I cannot understand it very well. I will talk with Yu to get more details.
+
+It seems the basic data types are matrices (although there is also a `TensorView` utility class). The mini-batch data for sequence data is packed in a matrix with N-row being `feature_dimension` and N-column being `sequence_length * batch_size` (see Figure 2.9 at page 50 of the [CNTKBook](http://research.microsoft.com/pubs/226641/CNTKBook-20151201.pdf)).
+
+Recurrent networks is a first-class citizen in CNTK. In section 5.2.1.8 of the CNTKBook, we can see an example of customized computation node. The node need to explicitly define function for standard forward and forward with a time index, which is used for RNN evaluation:
+
+```cpp
+virtual void EvaluateThisNode()
+{
+    EvaluateThisNodeS(FunctionValues(), Inputs(0)->
+        FunctionValues(), Inputs(1)->FunctionValues());
+}
+virtual void EvaluateThisNode(const size_t timeIdxInSeq)
+{
+    Matrix<ElemType> sliceInputValue = Inputs(1)->
+        FunctionValues().ColumnSlice(timeIdxInSeq *
+        m_samplesInRecurrentStep, m_samplesInRecurrentStep);
+    Matrix<ElemType> sliceOutputValue = m_functionValues.
+        ColumnSlice(timeIdxInSeq * m_samplesInRecurrentStep,
+        m_samplesInRecurrentStep);
+    EvaluateThisNodeS(sliceOutputValue, Inputs(0)->
+        FunctionValues(), sliceInput1Value);
+}
+```
+
+The function `ColumnSlice(start_col, num_col)` takes out the packed data for that time index as described above (here `m_samplesInRecurrentStep` must be mini-batch size).
+
+The low-level API for recurrent connection seem to be a *delay node*. But I'm not sure how to use this low level API. The [example of ptb language model](https://cntk.codeplex.com/SourceControl/latest#Examples/Text/PennTreebank/Config/rnn.config) uses very high-level API (simply setting `recurrentLayer = 1` in the config).
+
+## TensorFlow
+
+The [current example of RNNLM](https://www.tensorflow.org/versions/master/tutorials/recurrent/index.html#recurrent-neural-networks) in TensorFlow use explicit unrolling for a predefined number of time steps. The white paper mentioned advanced control flow API (Theano's scan-like) coming in the future.
