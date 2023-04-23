@@ -197,4 +197,47 @@ KVStore的实现是基于参数服务器。但它跟前面的工作有两个显�
 
 <img src=https://raw.githubusercontent.com/dmlc/web-data/master/mxnet/paper/time_forward_backward.png width=400/>
 
-可以看出MXNet，Torch和Caffe三者在性能上不相上下。这个符合预期，因为在单卡上我们评测的
+可以看出MXNet，Torch和Caffe三者在性能上不相上下。这个符合预期，因为在单卡上我们评测的几个网络的绝大部分运算都由CUDA和CUDNN完成。TensorFlow比其他三者都慢2倍以上，这可能由于是低版本的CUDNN和项目刚开源的缘故。
+
+### 内存的使用
+
+接下来我们考察不同的内存分配算法对内存占用的影响。下图分别表示使用batch=128时，在做预测时和做训练时的不同算法在内部变量（除去模型，最初输入和最终输出）上的内存开销。
+
+<img src=https://raw.githubusercontent.com/dmlc/web-data/master/mxnet/paper/mem_forward.png width=400/> <img src=https://raw.githubusercontent.com/dmlc/web-data/master/mxnet/paper/mem_forward_backward.png width=400/>
+
+可以看出，inplace和co-share两者都可以极大的降低内存使用。将两者合起来可以在训练时减少2倍内存使用，在预测时则可以减小4倍内存使用。特别的，即使是最复杂的vggnet，对单张图片进行预测时，MXNet只需要16MB额外内存。
+
+### Scalability
+
+最后我们报告在分布式训练下的性能。我们使用imagenet 1k数据（120万224x224x3图片，1000类），并用googlenet加上batch normalization来训练。我们使用Amazon EC2 g2.8x，单机和多机均使用同样的参数，下图表示了使用单机和10台g2.8x时的收敛情况。
+
+<img src=https://raw.githubusercontent.com/dmlc/web-data/master/mxnet/image/inception-with-bn-imagnet1k.png width=600px/>
+
+从训练精度来看，单机的收敛比多机快，这个符合预期，因为多机时有效的batch大小比单机要大，在处理同样多的数据上收敛通常会慢。但有意思的是两者在测试精度上非常相似。
+
+单机下每遍历一次数据需要1万4千秒，而在十台机器上，每次只需要1千4百秒。如果考虑运行时间对比测试精度，10台机器带来了10倍的提升。
+
+## 过去，现状，和未来
+
+大半年前我们拉来数个优秀的C++机器学习系统的开发人员成立了DMLC，本意是更方便共享各自项目的代码，并给用户提供一致的体验。当时我们有两个深度学习的项目，一个是CXXNet，其通过配置来定义和训练神经网络。另一个是Minerva，提供类似numpy一样的张量计算接口。前者在图片分类等使用卷积网络上很方便，而后者更灵活。那时候我们想能不能做一个两者功能都具备的系统，于是这样就有了MXNet。其名字来自Minerva的M和CXXNet的XNet。其中Symbol的想法来自CXXNet，而NDArray的想法来自Minerva。我们也常把MXNet叫“mix net”。
+
+MXNet是DMLC第一个结合了所有成员努力的项目，也同时吸引了很多核心成员的加入。MXNet的目的是做一个有意思的系统，能够让大家用着方便的系统，一个轻量的和可以快速测试系统和算法想法的系统。对于未来，我们主要关注下面四个方向：
+
+1. 支持更多的硬件，我们目前在积极考虑支持AMD GPU，高通GPU，Intel Phi，FPGA，和更多智能设备。相信MXNet的轻量和内存节省可以在这些上大有作为。
+2. 更加完善的操作子。目前不论是Symbol还是NDArray支持的操作还是有限，我们希望能够尽快的扩充他们。
+3. 更多编程语言。除了C++，目前MXNet对Python，R和Julia的支持比较完善。但我们希望还能有很多的语言，例如javascript。
+4. 更多的应用。我们之前花了很多精力在图片分类上，下面我们会考虑很多的应用。例如上周我们试了下如何利用一张图片的风格和一张图片的内容合成一张新图片。下图是利用我办公室窗景和梵高的starry night来合成图片
+
+ <img src=https://github.com/dmlc/web-data/raw/master/mxnet/neural-style/input/IMG_4343.jpg width=300px><img src=https://github.com/dmlc/web-data/raw/master/mxnet/neural-style/input/starry_night.jpg width=300px>
+
+ <img src=https://github.com/dmlc/web-data/raw/master/mxnet/neural-style/output/4343_starry_night.jpg width=600px>
+
+ 接下来我们希望能够在更多应用，例如语音、翻译、问答上有所产出。
+
+我们忠心希望MXNet能为大家做深度学习相关研究和应用带来便利。也希望能与更多的开发者一起学习和进步。
+
+## 扩展阅读
+
+1. 此文大部分内容已经发表在NIPS LearningSys 2015上，[paper link](http://www.cs.cmu.edu/~muli/file/MXNet-learning-sys.pdf)
+2. 本文只是对MXNet各个部件做了初步的介绍，更多文档参见 [MXNet/doc](http://MXNet.readthedocs.org/en/latest/index.html)
+3. 本文实验代码均在 [MXNet/example](https://github.com/dmlc/mxnet/tree/master/example)
