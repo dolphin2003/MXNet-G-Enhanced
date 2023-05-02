@@ -165,4 +165,8 @@ class AutoEncoderModel(model.MXModel):
 
     def eval(self, X):
         batch_size = 100
-        data_iter = mx.io.NDArra
+        data_iter = mx.io.NDArrayIter({'data': X}, batch_size=batch_size, shuffle=False,
+                                      last_batch_handle='pad')
+        Y = model.extract_feature(self.loss, self.args, self.auxs, data_iter,
+                                 X.shape[0], self.xpu).values()[0]
+        return np.mean(np.square(Y-X))/2.0
