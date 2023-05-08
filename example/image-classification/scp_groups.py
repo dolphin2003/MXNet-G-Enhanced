@@ -7,7 +7,7 @@ import struct
 import fcntl
 
 def scp_groups(ip, path, user):
-    from_path = './data_sharding'
+    from_path = './groups'
     to_path = user + '@' + ip + ':' + path
     cmd = 'scp' + ' ' + from_path + ' ' + to_path
     os.system(cmd)
