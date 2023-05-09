@@ -31,4 +31,24 @@ class CrossNet(FuseNet):
 
     def get_group(self, name,data1,data2,count,kin,kout, last=False):
         for idx in range(count):
-            data1,data2 = self.get_fusion(name+'_b%d'%(idx+1), data1, data2, kin, k
+            data1,data2 = self.get_fusion(name+'_b%d'%(idx+1), data1, data2, kin, kout, last if idx==count-1 else False)
+            kin=kout
+        return data1,data2
+
+    def get_symbol(self):
+        # start network definition
+        data = mx.sym.Variable(name='data')
+        # stage conv1_x
+        data=self.get_conv('g0', data, self.num_filters[0], kernel=(3, 3), stride=(1, 1), pad=(1, 1))
+        # stage conv2_x, conv3_x, conv4_x, conv5_x
+        data1,data2=self.get_group('g1', data , data , self.num_blocks[0], self.num_filters[0], self.num_filters[1])
+        data1,data2=self.get_group('g2', data1, data2, self.num_blocks[1], self.num_filters[1], self.num_filters[2])
+        data ,  _  =self.get_group('g3', data1, data2, self.num_blocks[2], self.num_filters[2], self.num_filters[3], last=True)
+        # classification layer
+        data=self.get_fc('cls', data)
+        softmax = mx.sym.SoftmaxOutput(name='softmax', data=data)
+        return softmax
+
+def get_symbol(num_classes=100, num_depth=56, widen_factor=1, **kwargs):
+    net=CrossNet(num_classes,num_depth, widen_factor)
+    return net.get_symbol()
