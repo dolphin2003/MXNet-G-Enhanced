@@ -56,4 +56,45 @@ def residual_factory(data, num_filter, dim_match):
         new_data = identity_data + conv2
         act = mx.symbol.Activation(data=new_data, act_type='relu')
         return act
-    e
+    else:        
+        conv1 = conv_factory(data=data, num_filter=num_filter, kernel=(3,3), stride=(2,2), pad=(1,1), act_type='relu', conv_type=0)
+        conv2 = conv_factory(data=conv1, num_filter=num_filter, kernel=(3,3), stride=(1,1), pad=(1,1), conv_type=1)
+
+        # adopt project method in the paper when dimension increased
+        project_data = conv_factory(data=data, num_filter=num_filter, kernel=(1,1), stride=(2,2), pad=(0,0), conv_type=1)
+        new_data = project_data + conv2
+        act = mx.symbol.Activation(data=new_data, act_type='relu')
+        return act
+
+def residual_net(data, n):
+    #fisrt 2n layers
+    for i in range(n):
+        data = residual_factory(data=data, num_filter=16, dim_match=True)
+    
+    #second 2n layers
+    for i in range(n):
+        if i==0:
+            data = residual_factory(data=data, num_filter=32, dim_match=False)
+        else:
+            data = residual_factory(data=data, num_filter=32, dim_match=True)
+    
+    #third 2n layers
+    for i in range(n):
+        if i==0:
+            data = residual_factory(data=data, num_filter=64, dim_match=False)
+        else:
+            data = residual_factory(data=data, num_filter=64, dim_match=True)
+     
+    return data
+
+def get_symbol(num_classes = 10):
+    conv = conv_factory(data=mx.symbol.Variable(name='data'), num_filter=16, kernel=(3,3), stride=(1,1), pad=(1,1), act_type='relu', conv_type=0)
+    n = 9 # set n = 3 means get a model with 3*6+2=20 layers, set n = 9 means 9*6+2=56 layers
+    resnet = residual_net(conv, n) # 
+    pool = mx.symbol.Pooling(data=resnet, kernel=(7,7), pool_type='avg')
+    flatten = mx.symbol.Flatten(data=pool, name='flatten')
+    fc = mx.symbol.FullyConnected(data=flatten, num_hidden=num_classes,  name='fc1')
+    softmax = mx.symbol.SoftmaxOutput(data=fc, name='softmax')
+    return softmax
+
+
