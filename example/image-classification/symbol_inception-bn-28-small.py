@@ -41,4 +41,17 @@ def get_symbol(num_classes = 10, force_mirroring=False):
     data = mx.symbol.Variable(name="data")
     conv1 = ConvFactory(data=data, kernel=(3,3), pad=(1,1), num_filter=96, act_type="relu", mirror_attr=attr)
     in3a = SimpleFactory(conv1, 32, 32, mirror_attr=attr)
-    in3b = SimpleFactory(in3a, 32, 48, mirror_attr
+    in3b = SimpleFactory(in3a, 32, 48, mirror_attr=attr)
+    in3c = DownsampleFactory(in3b, 80, mirror_attr=attr)
+    in4a = SimpleFactory(in3c, 112, 48, mirror_attr=attr)
+    in4b = SimpleFactory(in4a, 96, 64, mirror_attr=attr)
+    in4c = SimpleFactory(in4b, 80, 80, mirror_attr=attr)
+    in4d = SimpleFactory(in4c, 48, 96, mirror_attr=attr)
+    in4e = DownsampleFactory(in4d, 96, mirror_attr=attr)
+    in5a = SimpleFactory(in4e, 176, 160, mirror_attr=attr)
+    in5b = SimpleFactory(in5a, 176, 160, mirror_attr=attr)
+    pool = mx.symbol.Pooling(data=in5b, pool_type="avg", kernel=(7,7), name="global_pool", attr=attr)
+    flatten = mx.symbol.Flatten(data=pool, name="flatten1", attr=attr)
+    fc = mx.symbol.FullyConnected(data=flatten, num_hidden=num_classes, name="fc1")
+    softmax = mx.symbol.SoftmaxOutput(data=fc, name="softmax")
+    return softmax
