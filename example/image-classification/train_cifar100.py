@@ -1,3 +1,4 @@
+
 import find_mxnet
 import mxnet as mx
 import argparse
@@ -6,10 +7,10 @@ import train_model
 import socket #2016.10.6
 import linecache
 
-parser = argparse.ArgumentParser(description='train an image classifer on cifar10')
+parser = argparse.ArgumentParser(description='train an image classifer on cifar100')
 parser.add_argument('--network', type=str, default='inception-bn-28-small',
                     help = 'the cnn to use')
-parser.add_argument('--data-dir', type=str, default='cifar10/',
+parser.add_argument('--data-dir', type=str, default='cifar100/',
                     help='the input data directory')
 parser.add_argument('--gpus', type=str,
                     help='the gpus will be used, e.g "0,1,2,3"')
@@ -32,9 +33,9 @@ parser.add_argument('--log-file', type=str,
 parser.add_argument('--log-dir', type=str, default="output",
                     help='directory of the log file')
 '''yegeyan 2016.10.6'''
-parser.add_argument('--hostname', type=str, default="gpu-cluster-1",
+parser.add_argument('--hostname', type=str, default="gpu-node-1",
                     help='the hostname of this worker')
-parser.add_argument('--dataset', type=str, default='cifar10',
+parser.add_argument('--dataset', type=str, default='cifar100',
                     help='the dataset of training')
 parser.add_argument('--staleness', type=int, default=0,
                     help='the staleness of dist_ssync')
@@ -57,32 +58,32 @@ def _download(data_dir):
     os.chdir(data_dir)
     if (not os.path.exists('train.rec')) or \
        (not os.path.exists('test.rec')) :
-        os.system("wget http://data.dmlc.ml/mxnet/data/cifar10.zip")
-        os.system("unzip -u cifar10.zip")
-        os.system("mv cifar/* .; rm -rf cifar; rm cifar10.zip")
+        os.system("wget http://data.dmlc.ml/mxnet/data/cifar100.zip")
+        os.system("unzip -u cifar100.zip")
+        os.system("mv cifar/* .; rm -rf cifar; rm cifar100.zip")
     os.chdir("..")
 
 # network
 import importlib
-net = importlib.import_module('symbol_' + args.network).get_symbol(10)
+net = importlib.import_module('symbol_' + args.network).get_symbol(100)
 
 # data
 def get_iterator(args, kv):
     data_shape = (3, 28, 28)
     if '://' not in args.data_dir:
         _download(args.data_dir)
-
+    
     splits = kv.num_workers
     part = kv.rank
     val_splits = kv.num_workers
     val_part = kv.rank
-     
+
     if args.data_allocator == 1:
         data_rate = linecache.getline("data_sharding", kv.rank + 1).split(' ')
         part = float(data_rate[0])
         splits = float(data_rate[1])
     args.data_proportion = splits - part
-    
+        
     train = mx.io.ImageRecordIter(
         path_imgrec = args.data_dir + "train.rec",
         mean_img    = args.data_dir + "mean.bin",
