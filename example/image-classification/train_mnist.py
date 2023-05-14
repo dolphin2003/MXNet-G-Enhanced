@@ -125,4 +125,54 @@ def parse_args():
     parser.add_argument('--gpus', type=str,
                         help='the gpus will be used, e.g "0,1,2,3"')
     parser.add_argument('--num-examples', type=int, default=60000,
-                        help='the number of trainin
+                        help='the number of training examples')
+    parser.add_argument('--batch-size', type=int, default=128,
+                        help='the batch size')
+    parser.add_argument('--lr', type=float, default=.1,
+                        help='the initial learning rate')
+    parser.add_argument('--model-prefix', type=str,
+                        help='the prefix of the model to load/save')
+    parser.add_argument('--save-model-prefix', type=str,
+                        help='the prefix of the model to save')
+    parser.add_argument('--num-epochs', type=int, default=4,
+                        help='the number of training epochs')
+    parser.add_argument('--load-epoch', type=int,
+                        help="load the model on an epoch using the model-prefix")
+    parser.add_argument('--kv-store', type=str, default='local',
+                        help='the kvstore type')
+    parser.add_argument('--lr-factor', type=float, default=1,
+                        help='times the lr with a factor for every lr-factor-epoch epoch')
+    parser.add_argument('--lr-factor-epoch', type=float, default=1,
+                        help='the number of epoch to factor the lr, could be .5')
+    '''yegeyan 2016.10.6'''
+    parser.add_argument('--hostname', type=str, default="gpu-cluster-1",
+                        help='the hostname of this worker')
+    parser.add_argument('--dataset', type=str, default='mnist',
+                        help='the dataset of training')
+    parser.add_argument('--staleness', type=int, default=0,
+                    help='the staleness of dist_ssync')
+    parser.add_argument('--savemodel', action='store_true', default=False, 
+                    help='true means save model')
+    parser.add_argument('--retrain', action='store_true', default=False, 
+                    help='true means continue training')
+    parser.add_argument('--model-load-epoch', type=int, default=0,
+                    help='load the model on an epoch using the model-load-prefix')
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    args = parse_args()
+
+
+    if args.network == 'mlp':
+        data_shape = (784, )
+        net = get_mlp()
+    elif args.network == 'lenet-stn':
+        data_shape = (1, 28, 28)
+        net = get_lenet(True)
+    else:
+        data_shape = (1, 28, 28)
+        net = get_lenet()
+
+    # train
+    train_model.fit(args, net, get_iterator(data_shape))
