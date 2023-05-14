@@ -85,4 +85,34 @@ get_iterator <- function(data_shape) {
 parse_args <- function() {
     parser <- ArgumentParser(description='train an image classifer on mnist')
     parser$add_argument('--network', type='character', default='mlp',
-          
+                        choices = c('mlp', 'lenet'),
+                        help = 'the cnn to use')
+    parser$add_argument('--data-dir', type='character', default='mnist/',
+                        help='the input data directory')
+    parser$add_argument('--gpus', type='character',
+                        help='the gpus will be used, e.g "0,1,2,3"')
+    parser$add_argument('--batch-size', type='integer', default=128,
+                        help='the batch size')
+    parser$add_argument('--lr', type='double', default=.1,
+                        help='the initial learning rate')
+    parser$add_argument('--model-prefix', type='character',
+                        help='the prefix of the model to load/save')
+    parser$add_argument('--num-round', type='integer', default=10,
+                        help='the number of iterations over training data to train the model')
+    parser$add_argument('--kv-store', type='character', default='local',
+                        help='the kvstore type')
+
+    parser$parse_args()
+}
+
+args = parse_args()
+if (args$network == 'mlp') {
+    data_shape <- c(784)
+    net <- get_mlp()
+} else {
+    data_shape <- c(28, 28, 1)
+    net <- get_lenet()
+}
+# train
+source("train_model.R")
+train_model.fit(args, net, get_iterator(data_shape))
