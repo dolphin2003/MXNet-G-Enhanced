@@ -58,4 +58,28 @@ mod.fit(train_dataiter, eval_data=val_dataiter,
         optimizer_params={'learning_rate':0.01, 'momentum': 0.9}, num_epoch=n_epoch)
 
 # prediction iterator API
-for preds, i_batch, batch in mod.iter_predict(val_dat
+for preds, i_batch, batch in mod.iter_predict(val_dataiter):
+    pred_label = preds[0].asnumpy().argmax(axis=1)
+    label = batch.label[0].asnumpy().astype('int32')
+    if i_batch % 20 == 0:
+        print('batch %03d acc: %.3f' % (i_batch, (label == pred_label).sum() / float(len(pred_label))))
+
+# a dummy call just to test if the API works for merge_batches=True
+preds = mod.predict(val_dataiter)
+
+# perform prediction and calculate accuracy manually
+preds = mod.predict(val_dataiter, merge_batches=False)
+val_dataiter.reset()
+acc_sum = 0.0; acc_cnt = 0
+for i, batch in enumerate(val_dataiter):
+    pred_label = preds[i][0].asnumpy().argmax(axis=1)
+    label = batch.label[0].asnumpy().astype('int32')
+    acc_sum += (label == pred_label).sum()
+    acc_cnt += len(pred_label)
+print('validation Accuracy: %.3f' % (acc_sum / acc_cnt))
+
+# evaluate on validation set with a evaluation metric
+mod.score(val_dataiter, metric)
+for name, val in metric.get_name_value():
+    print('%s=%f' % (name, val))
+
