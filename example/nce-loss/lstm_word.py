@@ -162,4 +162,61 @@ class DataIter(mx.io.DataIter):
                      + [self.sample_ne() for _ in range(self.num_label-1)]\
                      for k in range(self.seq_len)]
             label_weight = [[1.0] \
-                            + [0.0 for _ in range(self.n
+                            + [0.0 for _ in range(self.num_label-1)]\
+                            for k in range(self.seq_len)]
+
+            batch_data.append(data)
+            batch_label.append(label)
+            batch_label_weight.append(label_weight)
+            if len(batch_data) == self.batch_size:
+                data_all = [mx.nd.array(batch_data)] + self.init_state_arrays
+                label_all = [mx.nd.array(batch_label), mx.nd.array(batch_label_weight)]
+                data_names = ['data'] + self.init_state_names
+                label_names = ['label', 'label_weight']
+                batch_data = []
+                batch_label = []
+                batch_label_weight = []
+                yield SimpleBatch(data_names, data_all, label_names, label_all)
+
+    def reset(self):
+        pass
+
+if __name__ == '__main__':
+    parser = OptionParser()
+    parser.add_option("-g", "--gpu", action = "store_true", dest = "gpu", default = False,
+                      help = "use gpu")
+    batch_size = 1024
+    seq_len = 5
+    num_label = 6
+    num_lstm_layer = 2
+    num_hidden = 100
+
+    init_c = [('l%d_init_c'%l, (batch_size, num_hidden)) for l in range(num_lstm_layer)]
+    init_h = [('l%d_init_h'%l, (batch_size, num_hidden)) for l in range(num_lstm_layer)]
+    init_states = init_c + init_h
+
+    data_train = DataIter("./data/text8", batch_size, seq_len, num_label,
+                          init_states)
+    
+    network = get_net(data_train.vocab_size, seq_len, num_label, num_lstm_layer, num_hidden)
+    options, args = parser.parse_args()
+    devs = mx.cpu()
+    if options.gpu == True:
+        devs = mx.gpu()
+    model = mx.model.FeedForward(ctx = devs,
+                                 symbol = network,
+                                 num_epoch = 20,
+                                 learning_rate = 0.3,
+                                 momentum = 0.9,
+                                 wd = 0.0000,
+                                 initializer=mx.init.Xavier(factor_type="in", magnitude=2.34))
+
+    import logging
+    head = '%(asctime)-15s %(message)s'
+    logging.basicConfig(level=logging.DEBUG, format=head)
+    
+    metric = NceLSTMAuc()
+    model.fit(X = data_train,
+              eval_metric = metric,
+              batch_end_callback = mx.callback.Speedometer(batch_size, 50),)
+
