@@ -206,4 +206,86 @@ class PascalVOC(IMDB):
         :param gt_roidb: ground truth roidb
         :return: roidb of rpn (ground truth included)
         """
-  
+        if self.image_set != 'test':
+            rpn_roidb = self.load_rpn_roidb(gt_roidb)
+            roidb = IMDB.merge_roidbs(gt_roidb, rpn_roidb)
+        else:
+            print 'rpn database need not be used in test'
+            roidb = self.load_rpn_roidb(gt_roidb)
+        return roidb
+
+    def evaluate_detections(self, detections):
+        """
+        top level evaluations
+        :param detections: result matrix, [bbox, confidence]
+        :return: None
+        """
+        # make all these folders for results
+        result_dir = os.path.join(self.devkit_path, 'results')
+        if not os.path.exists(result_dir):
+            os.mkdir(result_dir)
+        year_folder = os.path.join(self.devkit_path, 'results', 'VOC' + self.year)
+        if not os.path.exists(year_folder):
+            os.mkdir(year_folder)
+        res_file_folder = os.path.join(self.devkit_path, 'results', 'VOC' + self.year, 'Main')
+        if not os.path.exists(res_file_folder):
+            os.mkdir(res_file_folder)
+
+        self.write_pascal_results(detections)
+        self.do_python_eval()
+
+    def get_result_file_template(self):
+        """
+        this is a template
+        VOCdevkit/results/VOC2007/Main/<comp_id>_det_test_aeroplane.txt
+        :return: a string template
+        """
+        res_file_folder = os.path.join(self.devkit_path, 'results', 'VOC' + self.year, 'Main')
+        comp_id = self.config['comp_id']
+        filename = comp_id + '_det_' + self.image_set + '_{:s}.txt'
+        path = os.path.join(res_file_folder, filename)
+        return path
+
+    def write_pascal_results(self, all_boxes):
+        """
+        write results files in pascal devkit path
+        :param all_boxes: boxes to be processed [bbox, confidence]
+        :return: None
+        """
+        for cls_ind, cls in enumerate(self.classes):
+            if cls == '__background__':
+                continue
+            print 'Writing {} VOC results file'.format(cls)
+            filename = self.get_result_file_template().format(cls)
+            with open(filename, 'wt') as f:
+                for im_ind, index in enumerate(self.image_set_index):
+                    dets = all_boxes[cls_ind][im_ind]
+                    if len(dets) == 0:
+                        continue
+                    # the VOCdevkit expects 1-based indices
+                    for k in range(dets.shape[0]):
+                        f.write('{:s} {:.3f} {:.1f} {:.1f} {:.1f} {:.1f}\n'.
+                                format(index, dets[k, -1],
+                                       dets[k, 0] + 1, dets[k, 1] + 1, dets[k, 2] + 1, dets[k, 3] + 1))
+
+    def do_python_eval(self):
+        """
+        python evaluation wrapper
+        :return: None
+        """
+        annopath = os.path.join(self.data_path, 'Annotations', '{:s}.xml')
+        imageset_file = os.path.join(self.data_path, 'ImageSets', 'Main', self.image_set + '.txt')
+        cache_dir = os.path.join(self.cache_path, self.name)
+        aps = []
+        # The PASCAL VOC metric changed in 2010
+        use_07_metric = True if int(self.year) < 2010 else False
+        print 'VOC07 metric? ' + ('Y' if use_07_metric else 'No')
+        for cls_ind, cls in enumerate(self.classes):
+            if cls == '__background__':
+                continue
+            filename = self.get_result_file_template().format(cls)
+            rec, prec, ap = voc_eval(filename, annopath, imageset_file, cls, cache_dir,
+                                     ovthresh=0.5, use_07_metric=use_07_metric)
+            aps += [ap]
+            print('AP for {} = {:.4f}'.format(cls, ap))
+        print('Mean AP = {:.4f}'.format(np.mean(aps)))
