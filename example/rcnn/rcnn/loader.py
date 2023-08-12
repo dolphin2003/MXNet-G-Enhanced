@@ -293,4 +293,6 @@ class AnchorLoader(mx.io.DataIter):
             self.data = [mx.nd.array(all_data['data'])]
 
             self.label = [mx.nd.array(all_label['label']),
-                 
+                          mx.nd.array(all_label['bbox_target']),
+                          mx.nd.array(all_label['bbox_inside_weight']),
+                          mx.nd.array(all_label['bbox_outside_weight'])]
