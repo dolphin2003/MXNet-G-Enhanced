@@ -51,4 +51,66 @@ def generate_detections(detector, test_data, imdb, vis=False):
     assert not test_data.shuffle
 
     i = 0
-    imdb_boxes = 
+    imdb_boxes = list()
+    for databatch in test_data:
+        if i % 10 == 0:
+            print 'generating detections {}/{}'.format(i, imdb.num_images)
+
+        boxes, scores = detector.im_detect(databatch.data['data'], databatch.data['im_info'])
+        scale = databatch.data['im_info'][0, 2]
+        # drop the batch index
+        boxes = boxes[:, 1:].copy() / scale
+        imdb_boxes.append(boxes)
+        if vis:
+            dets = np.hstack((boxes * scale, scores))
+            vis_detection(databatch.data['data'], dets, thresh=0.9)
+        i += 1
+
+    assert len(imdb_boxes) == imdb.num_images, 'calculations not complete'
+    rpn_folder = os.path.join(imdb.root_path, 'rpn_data')
+    if not os.path.exists(rpn_folder):
+        os.mkdir(rpn_folder)
+    rpn_file = os.path.join(rpn_folder, imdb.name + '_rpn.pkl')
+    with open(rpn_file, 'wb') as f:
+        cPickle.dump(imdb_boxes, f, cPickle.HIGHEST_PROTOCOL)
+    print 'wrote rpn proposals to {}'.format(rpn_file)
+    return imdb_boxes
+
+
+def vis_detection(im, dets, thresh=0.):
+    """
+    draw detected bounding boxes
+    :param im: [b, c, h, w] oin rgb
+    :param dets: only one class, [N * [4 coordinates score]]
+    :param thresh: thresh for valid detections
+    :return:
+    """
+    from rcnn.config import config
+    from helper.processing.image_processing import transform_inverse
+    import matplotlib.pyplot as plt
+    inds = np.where(dets[:, -1] >= thresh)[0]
+    if len(inds) == 0:
+        return
+    inds = np.argsort(dets[:, -1])[::-1]
+    inds = inds[:20]
+
+    class_name = 'obj'
+    fig, ax = plt.subplots(figsize=(12, 12))
+    im = transform_inverse(im, config.PIXEL_MEANS)
+    ax.imshow(im, aspect='equal')
+    for i in inds:
+        bbox = dets[i, :4]
+        score = dets[i, -1]
+        rect = plt.Rectangle((bbox[0], bbox[1]),
+                             bbox[2] - bbox[0],
+                             bbox[3] - bbox[1], fill=False,
+                             edgecolor='red', linewidth=3.5)
+        ax.add_patch(rect)
+        ax.text(bbox[0], bbox[1] - 2,
+                '{:s} {:3f}'.format(class_name, score),
+                bbox=dict(facecolor='blue', alpha=0.5), fontsize=14, color='white')
+    ax.set_title('{} detections with p({} | box) >= {:.1f}'.format(class_name, class_name, thresh), fontsize=14)
+    plt.axis('off')
+    plt.tight_layout()
+    plt.draw()
+    plt.show()
