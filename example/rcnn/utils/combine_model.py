@@ -9,4 +9,14 @@ def combine_model(prefix1, epoch1, prefix2, epoch2, prefix_out, epoch_out):
     aux_names = auxs1.keys() + auxs2.keys()
     args = dict()
     for arg in arg_names:
-        
+        if arg in args1:
+            args[arg] = args1[arg]
+        else:
+            args[arg] = args2[arg]
+    auxs = dict()
+    for aux in aux_names:
+        if aux in auxs1:
+            auxs[aux] = auxs1[aux]
+        else:
+            auxs[aux] = auxs2[aux]
+    save_checkpoint(prefix_out, epoch_out, args, auxs)
