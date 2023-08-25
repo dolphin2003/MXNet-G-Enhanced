@@ -70,4 +70,175 @@ lstm.unroll <- function(num.lstm.layer, seq.len, input.size,
                                prev.state=last.states[[i]],
                                param=param.cells[[i]],
                                seqidx=seqidx, layeridx=i, 
-                             
+                               dropout=dp)
+            hidden <- next.state$h
+            last.states[[i]] <- next.state
+        }
+        # decoder
+        if (dropout > 0)  
+            hidden <- mx.symbol.Dropout(data=hidden, p=dropout)
+        last.hidden <- c(last.hidden, hidden)
+    }
+    last.hidden$dim <- 0
+    last.hidden$num.args <- seq.len
+    concat <-mxnet:::mx.varg.symbol.Concat(last.hidden)
+    fc <- mx.symbol.FullyConnected(data=concat,
+                                   weight=cls.weight,
+                                   bias=cls.bias,
+                                   num.hidden=num.label)
+    loss.all <- mx.symbol.SoftmaxOutput(data=fc, label=label, name="sm")
+    unpack.c <- list()
+    unpack.h <- list()
+    for (i in 1:num.lstm.layer) {
+         state <- last.states[[i]]
+         state <- list(c=mx.symbol.BlockGrad(state$c, name=paste0("l", i, ".last.c")),
+                            h=mx.symbol.BlockGrad(state$h, name=paste0("l", i, ".last.h" )))
+        last.states[[i]] <- state
+        unpack.c <- c(unpack.c, state$c)
+        unpack.h <- c(unpack.h, state$h)
+    }
+    list.all <- c(loss.all, unpack.c, unpack.h)
+
+    return (mx.symbol.Group(list.all))
+}
+
+is.param.name <- function(name) {
+    return (grepl('weight$', name) || grepl('bias$', name) || 
+           grepl('gamma$', name) || grepl('beta$', name) )
+}
+
+mx.model.init.params <- function(symbol, input.shape, initializer, ctx) {
+  if (!is.mx.symbol(symbol)) stop("symbol need to be MXSymbol")
+  slist <- symbol$infer.shape(input.shape)
+  if (is.null(slist)) stop("Not enough information to get shapes")
+  arg.params <- mx.init.create(initializer, slist$arg.shapes, ctx, skip.unknown=TRUE)
+  aux.params <- mx.init.create(initializer, slist$aux.shapes, ctx, skip.unknown=FALSE)
+  return(list(arg.params=arg.params, aux.params=aux.params))
+}
+
+# set up rnn model with lstm cells
+setup.rnn.model <- function(ctx,
+                            num.lstm.layer, seq.len,
+                            num.hidden, num.embed, num.label,
+                            batch.size, input.size,
+                            initializer=mx.init.uniform(0.01), 
+                            dropout=0) {
+
+    rnn.sym <- lstm.unroll(num.lstm.layer=num.lstm.layer,
+                           num.hidden=num.hidden,
+                           seq.len=seq.len,
+                           input.size=input.size,
+                           num.embed=num.embed,
+                           num.label=num.label,
+                           dropout=dropout)
+    arg.names <- rnn.sym$arguments
+    input.shapes <- list()
+    for (name in arg.names) {
+        if (grepl('init.c$', name) || grepl('init.h$', name)) {
+            input.shapes[[name]] <- c(num.hidden, batch.size)
+        }
+        else if (grepl('data$', name)) {
+            input.shapes[[name]] <- c(batch.size)
+        }
+    }
+    
+    params <- mx.model.init.params(rnn.sym, input.shapes, initializer, ctx)
+
+    args <- input.shapes
+    args$symbol <- rnn.sym
+    args$ctx <- ctx
+    args$grad.req <- "add"
+    rnn.exec <- do.call(mx.simple.bind, args)
+
+    mx.exec.update.arg.arrays(rnn.exec, params$arg.params, match.name=TRUE)
+    mx.exec.update.aux.arrays(rnn.exec, params$aux.params, match.name=TRUE)
+
+    grad.arrays <- list()
+    for (name in names(rnn.exec$ref.grad.arrays)) {
+        if (is.param.name(name))
+            grad.arrays[[name]] <- rnn.exec$ref.arg.arrays[[name]]*0
+    }
+    mx.exec.update.grad.arrays(rnn.exec, grad.arrays, match.name=TRUE)
+
+    return (list(rnn.exec=rnn.exec, symbol=rnn.sym,
+                 num.lstm.layer=num.lstm.layer, num.hidden=num.hidden, 
+                 seq.len=seq.len, batch.size=batch.size,
+                 num.embed=num.embed))
+
+}
+
+
+get.rnn.inputs <- function(m, X, begin) {
+    seq.len <- m$seq.len
+    batch.size <- m$batch.size
+    seq.labels <- array(0, dim=c(seq.len*batch.size))
+    seq.data <- list()
+    for (seqidx in 1:seq.len) {
+        idx <- (begin + seqidx - 1) %% dim(X)[2] + 1
+        next.idx <- (begin + seqidx) %% dim(X)[2] + 1
+        x <- X[, idx]
+        y <- X[, next.idx]
+
+        seq.data[[paste0("t", seqidx, ".data")]] <- mx.nd.array(as.array(x))
+        seq.labels[((seqidx-1)*batch.size+1) : (seqidx*batch.size)] <- y
+    }
+    seq.data$label <- mx.nd.array(seq.labels)
+    return (seq.data)
+}
+
+
+calc.nll <- function(seq.label.probs, X, begin) {
+    nll = - sum(log(seq.label.probs)) / length(X[,1])
+    return (nll)
+}
+
+train.lstm <- function(model, X.train.batch, X.val.batch,
+                       num.round, update.period,
+                       optimizer='sgd', half.life=2, max.grad.norm = 5.0, ...) {
+    X.train.batch.shape <- dim(X.train.batch)
+    X.val.batch.shape <- dim(X.val.batch)
+    cat(paste0("Training with train.shape=(", paste0(X.train.batch.shape, collapse=","), ")"), "\n")
+    cat(paste0("Training with val.shape=(", paste0(X.val.batch.shape, collapse=","), ")"), "\n")
+
+    m <- model
+    seq.len <- m$seq.len
+    batch.size <- m$batch.size
+    num.lstm.layer <- m$num.lstm.layer
+    num.hidden <- m$num.hidden
+
+    opt <- mx.opt.create(optimizer, rescale.grad=(1/batch.size), ...)
+
+    updater <- mx.opt.get.updater(opt, m$rnn.exec$ref.arg.arrays)
+    epoch.counter <- 0
+    log.period <- max(as.integer(1000 / seq.len), 1)
+    last.perp <- 10000000.0
+
+    for (iteration in 1:num.round) {
+        nbatch <- 0
+        train.nll <- 0
+        # reset states
+        init.states <- list()
+        for (i in 1:num.lstm.layer) {
+            init.states[[paste0("l", i, ".init.c")]] <- mx.nd.zeros(c(num.hidden, batch.size))
+            init.states[[paste0("l", i, ".init.h")]] <- mx.nd.zeros(c(num.hidden, batch.size))
+        }
+        mx.exec.update.arg.arrays(m$rnn.exec, init.states, match.name=TRUE) 
+
+        tic <- Sys.time()
+
+        stopifnot(dim(X.train.batch)[[2]] %% seq.len == 0)
+        stopifnot(dim(X.val.batch)[[2]] %% seq.len == 0)
+
+        for (begin in seq(1, dim(X.train.batch)[2], seq.len)) {
+            # set rnn input
+            rnn.input <- get.rnn.inputs(m, X.train.batch, begin=begin)
+            mx.exec.update.arg.arrays(m$rnn.exec, rnn.input, match.name=TRUE) 
+
+            mx.exec.forward(m$rnn.exec, is.train=TRUE)
+            # probability of each label class, used to evaluate nll
+            seq.label.probs <- mx.nd.choose.element.0index(m$rnn.exec$outputs[["sm_output"]], m$rnn.exec$arg.arrays[["label"]])
+            mx.exec.backward(m$rnn.exec)
+            # transfer the states
+            init.states <- list()
+            for (i in 1:num.lstm.layer) {
+              
