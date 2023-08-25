@@ -26,4 +26,88 @@ make.dict <- function(text, max.vocab=10000) {
 	dic <- list()
 	idx <- 1
     for (c in text[[1]]) {
-    	if (!(c %in% names(dic))) 
+    	if (!(c %in% names(dic))) {
+        	dic[[c]] <- idx
+        	idx <- idx + 1
+        }
+    }
+    if (length(dic) == max.vocab - 1)
+        dic[["UNKNOWN"]] <- idx
+    cat(paste0("Total unique char: ", length(dic), "\n"))
+    return (dic)
+}
+
+# Transfer text into data batch
+make.batch <- function(file.path, batch.size=32, seq.lenth=32, max.vocab=10000, dic=NULL) {
+    fi <- file(file.path, "r")
+    text <- paste(readLines(fi), collapse="\n")
+    close(fi)
+
+    if (is.null(dic))
+        dic <- make.dict(text, max.vocab)
+    lookup.table <- list()
+    for (c in names(dic)) {
+    	idx <- dic[[c]]
+    	lookup.table[[idx]] <- c 
+    }
+
+    char.lst <- strsplit(text, '')[[1]]
+    num.batch <- as.integer(length(char.lst) / batch.size)
+    char.lst <- char.lst[1:(num.batch * batch.size)]
+    data <- array(0, dim=c(batch.size, num.batch))
+    idx <- 1
+    for (j in 1:batch.size) {
+        for (i in 1:num.batch) {
+            if (char.lst[idx] %in% names(dic))
+                data[j, i] <- dic[[ char.lst[idx] ]]
+            else {
+                data[j, i] <- dic[["UNKNOWN"]]
+            }
+            idx <- idx + 1
+        }
+    }
+    return (list(data=data, dic=dic, lookup.table=lookup.table))
+}
+
+# Move tail text
+drop.tail <- function(X, seq.len) {
+    shape <- dim(X)
+    nstep <- as.integer(shape[2] / seq.len)
+    return (X[, 1:(nstep * seq.len)])
+}
+
+ret <- make.batch("./data/input.txt", batch.size=batch.size, seq.lenth=seq.len)
+X <- ret$data
+dic <- ret$dic
+lookup.table <- ret$lookup.table
+
+vocab <- length(dic)
+
+shape <- dim(X)
+train.val.fraction <- 0.9
+size <- shape[2]
+X.train <- X[, 1:as.integer(size * train.val.fraction)]
+X.val <- X[, -(1:as.integer(size * train.val.fraction))]
+X.train <- drop.tail(X.train, seq.len)
+X.val <- drop.tail(X.val, seq.len)
+
+# Set up LSTM model
+model <- setup.rnn.model(ctx=mx.gpu(0),
+                         num.lstm.layer=num.lstm.layer,
+                         seq.len=seq.len,
+                         num.hidden=num.hidden,
+                         num.embed=num.embed,
+                         num.label=vocab,
+                         batch.size=batch.size,
+                         input.size=vocab,
+                         initializer=mx.init.uniform(0.1),
+                         dropout=0.)
+
+# Train LSTM model
+train.lstm(model, X.train, X.val,
+                num.round=num.round,
+                half.life=3,
+                update.period=update.period,
+                learning.rate=learning.rate,
+                wd=wd,
+                clip_gradient=clip_gradient)
