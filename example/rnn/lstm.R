@@ -241,4 +241,82 @@ train.lstm <- function(model, X.train.batch, X.val.batch,
             # transfer the states
             init.states <- list()
             for (i in 1:num.lstm.layer) {
-              
+                init.states[[paste0("l", i, ".init.c")]] <- m$rnn.exec$outputs[[paste0("l", i, ".last.c_output")]]
+                init.states[[paste0("l", i, ".init.h")]] <- m$rnn.exec$outputs[[paste0("l", i, ".last.h_output")]]
+            }
+            mx.exec.update.arg.arrays(m$rnn.exec, init.states, match.name=TRUE) 
+            # update epoch counter
+            epoch.counter <- epoch.counter + 1
+            if (epoch.counter %% update.period == 0) {
+
+                # the gradient of initial c and inital h should be zero
+                init.grad <- list()
+                for (i in 1:num.lstm.layer) {
+                    init.grad[[paste0("l", i, ".init.c")]] <- m$rnn.exec$ref.arg.arrays[[paste0("l", i, ".init.c")]]*0
+                    init.grad[[paste0("l", i, ".init.h")]] <- m$rnn.exec$ref.arg.arrays[[paste0("l", i, ".init.h")]]*0
+                }
+                mx.exec.update.grad.arrays(m$rnn.exec, init.grad, match.name=TRUE)
+
+                arg.blocks <- updater(m$rnn.exec$ref.arg.arrays, m$rnn.exec$ref.grad.arrays)
+
+                mx.exec.update.arg.arrays(m$rnn.exec, arg.blocks, skip.null=TRUE)
+
+                grad.arrays <- list()
+                for (name in names(m$rnn.exec$ref.grad.arrays)) {
+                    if (is.param.name(name))
+                        grad.arrays[[name]] <- m$rnn.exec$ref.grad.arrays[[name]]*0
+                }
+                mx.exec.update.grad.arrays(m$rnn.exec, grad.arrays, match.name=TRUE)
+
+            }
+
+            train.nll <- train.nll + calc.nll(as.array(seq.label.probs), X.train.batch, begin=begin)
+
+            nbatch <- begin + seq.len
+            if ((epoch.counter %% log.period) == 0) {
+                cat(paste0("Epoch [", epoch.counter, 
+                           "] Train: NLL=", train.nll / nbatch, 
+                           ", Perp=", exp(train.nll / nbatch), "\n"))
+            }
+        }
+        # end of training loop
+        toc <- Sys.time()
+        cat(paste0("Iter [", iteration, 
+                   "] Train: Time: ", as.numeric(toc - tic, units="secs"),
+                   " sec, NLL=", train.nll / nbatch,
+                   ", Perp=", exp(train.nll / nbatch), "\n"))
+
+        val.nll <- 0.0
+        # validation set, reset states
+        init.states <- list()
+        for (i in 1:num.lstm.layer) {
+            init.states[[paste0("l", i, ".init.c")]] <- mx.nd.zeros(c(num.hidden, batch.size))
+            init.states[[paste0("l", i, ".init.h")]] <- mx.nd.zeros(c(num.hidden, batch.size))
+        }
+        mx.exec.update.arg.arrays(m$rnn.exec, init.states, match.name=TRUE) 
+
+        for (begin in seq(1, dim(X.val.batch)[2], seq.len)) {
+            # set rnn input
+            rnn.input <- get.rnn.inputs(m, X.val.batch, begin=begin)
+            mx.exec.update.arg.arrays(m$rnn.exec, rnn.input, match.name=TRUE) 
+            mx.exec.forward(m$rnn.exec, is.train=FALSE)
+            # probability of each label class, used to evaluate nll
+            seq.label.probs <- mx.nd.choose.element.0index(m$rnn.exec$outputs[["sm_output"]], m$rnn.exec$arg.arrays[["label"]])
+            # transfer the states
+            init.states <- list()
+            for (i in 1:num.lstm.layer) {
+                init.states[[paste0("l", i, ".init.c")]] <- m$rnn.exec$outputs[[paste0("l", i, ".last.c_output")]]
+                init.states[[paste0("l", i, ".init.h")]] <- m$rnn.exec$outputs[[paste0("l", i, ".last.h_output")]]
+            }
+            mx.exec.update.arg.arrays(m$rnn.exec, init.states, match.name=TRUE)
+            val.nll <- val.nll + calc.nll(as.array(seq.label.probs), X.val.batch, begin=begin)
+        }
+        nbatch <- dim(X.val.batch)[2]
+        perp <- exp(val.nll / nbatch)
+        cat(paste0("Iter [", iteration,  
+                   "] Val: NLL=", val.nll / nbatch,
+                   ", Perp=", exp(val.nll / nbatch), "\n"))
+
+
+    }
+}
