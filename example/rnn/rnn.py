@@ -58,4 +58,28 @@ def rnn_unroll(num_rnn_layer, seq_len, input_size,
         # embeding layer
         data = mx.sym.Variable("data/%d" % seqidx)
 
-        hidden = mx.s
+        hidden = mx.sym.Embedding(data=data, weight=embed_weight,
+                                  input_dim=input_size,
+                                  output_dim=num_embed,
+                                  name="t%d_embed" % seqidx)
+        # stack RNN
+        for i in range(num_rnn_layer):
+            if i==0:
+                dp=0.
+            else:
+                dp = dropout
+            next_state = rnn(num_hidden, in_data=hidden,
+                             prev_state=last_states[i],
+                             param=param_cells[i],
+                             seqidx=seqidx, layeridx=i, dropout=dp, batch_norm=batch_norm)
+            hidden = next_state.h
+            last_states[i] = next_state
+        # decoder
+        if dropout > 0.:
+            hidden = mx.sym.Dropout(data=hidden, p=dropout)
+        fc = mx.sym.FullyConnected(data=hidden, weight=cls_weight, bias=cls_bias,
+                                   num_hidden=num_label)
+        sm = mx.sym.SoftmaxOutput(data=fc, label=mx.sym.Variable('label/%d' % seqidx),
+                                  name='t%d_sm' % seqidx)
+        loss_all.append(sm)
+    return mx.sym.Group(loss_all)
