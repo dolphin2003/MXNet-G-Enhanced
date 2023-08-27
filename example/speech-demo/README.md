@@ -90,4 +90,58 @@ TRANSFORM scp:feat.scp
 scp:label.scp
 ```
 
-Here the `TRANSFORM` is the transformation you want to apply to the features. By default we use `NO_FEATURE_TRANSFORM`. The `scp:` syntax is from Kaldi. The `feat.scp` is typically the file from `data/sdm1/train/feats.scp`, and the `label.scp` is converted from the force-aligned labels located in `exp/sdm1/tri3a_ali`. Because the force-alignments are only generated on the training data, we split the training set into 90/10 parts, and use the 1/10 hold-out as the dev set (validation set). The script [run_ami.sh](run_ami.sh) will automatically do the spliting and format the file for MXNet. Please set the path in that script correctly before running. The [run_ami.sh](run_ami.sh) script will actually run the full pipeline including 
+Here the `TRANSFORM` is the transformation you want to apply to the features. By default we use `NO_FEATURE_TRANSFORM`. The `scp:` syntax is from Kaldi. The `feat.scp` is typically the file from `data/sdm1/train/feats.scp`, and the `label.scp` is converted from the force-aligned labels located in `exp/sdm1/tri3a_ali`. Because the force-alignments are only generated on the training data, we split the training set into 90/10 parts, and use the 1/10 hold-out as the dev set (validation set). The script [run_ami.sh](run_ami.sh) will automatically do the spliting and format the file for MXNet. Please set the path in that script correctly before running. The [run_ami.sh](run_ami.sh) script will actually run the full pipeline including training the acoustic model and decoding. So you can skip the following steps if that scripts successfully runs.
+
+### Run MXNet Acoustic Model Training
+
+1. Go back to this speech demo directory in MXNet. Make a copy of `default.cfg` and edit necessary items like the path to the dataset you just prepared.
+2. Run `python train_lstm.py --configfile=your-config.cfg`. You can do `python train_lstm.py --help` to see the helps. All the configuration parameters can be set in `default.cfg`, customized config file, and through command line (e.g. `--train_batch_size=50`), and the latter values overwrite the former ones.
+
+Here are some example outputs that we got from training on the TIMIT dataset.
+
+```
+Example output for TIMIT:
+Summary of dataset ==================
+bucket of len 100 : 3 samples
+bucket of len 200 : 346 samples
+bucket of len 300 : 1496 samples
+bucket of len 400 : 974 samples
+bucket of len 500 : 420 samples
+bucket of len 600 : 90 samples
+bucket of len 700 : 11 samples
+bucket of len 800 : 2 samples
+Summary of dataset ==================
+bucket of len 100 : 0 samples
+bucket of len 200 : 28 samples
+bucket of len 300 : 169 samples
+bucket of len 400 : 107 samples
+bucket of len 500 : 41 samples
+bucket of len 600 : 6 samples
+bucket of len 700 : 3 samples
+bucket of len 800 : 0 samples
+2016-04-21 20:02:40,904 Epoch[0] Train-Acc_exlude_padding=0.154763
+2016-04-21 20:02:40,904 Epoch[0] Time cost=91.574
+2016-04-21 20:02:44,419 Epoch[0] Validation-Acc_exlude_padding=0.353552
+2016-04-21 20:04:17,290 Epoch[1] Train-Acc_exlude_padding=0.447318
+2016-04-21 20:04:17,290 Epoch[1] Time cost=92.870
+2016-04-21 20:04:20,738 Epoch[1] Validation-Acc_exlude_padding=0.506458
+2016-04-21 20:05:53,127 Epoch[2] Train-Acc_exlude_padding=0.557543
+2016-04-21 20:05:53,128 Epoch[2] Time cost=92.390
+2016-04-21 20:05:56,568 Epoch[2] Validation-Acc_exlude_padding=0.548100
+```
+
+The final frame accuracy was around 62%.
+
+### Run decode on the trained acoustic model
+
+1. Estimate senone priors by run `python make_stats.py --configfile=your-config.cfg | copy-feats ark:- ark:label_mean.ark` (edit necessary items like the path to the training dataset). It will generate the label counts in `label_mean.ark`.
+2. Link to necessary Kaldi decode setup e.g. `local/` and `utils/` and Run `./run_ami.sh --model prefix model --num_epoch num`.
+
+Here are the results on TIMIT and AMI test set (using all default setup, 3 layer LSTM with projection layers):
+
+| Corpus | WER |
+|--------|-----|
+|TIMIT   | 18.9|
+|AMI     | 51.7 (42.2) |
+
+Note that for AMI 42.2 was evaluated non-overlapped speech. Kaldi-HMM baseline was 67.2% and DNN was 57.5%.
