@@ -41,4 +41,104 @@ class _StreamVariance(object):
 class FeatureStats(object):
 
     def __init__(self):
-        self.mean           
+        self.mean           = numpy.zeros(1,)
+        self.invStd         = numpy.zeros(1,)
+        self.populationSize = 0
+        self.dim            = None
+
+    def GetMean(self):
+        return self.mean
+
+    def GetVariance(self):
+        return numpy.power(self.GetStd(),2)
+
+    def GetStd(self):
+        return 1.0/self.invStd
+
+    def GetInvStd(self):
+        return self.invStd
+
+    """
+
+    def GetStatsFromList(self,fileList,featureFileHandler):
+        stats = None
+
+        for featureFile,label in featureList.FeatureList(fileList):
+            if stats == None:
+                self.dim = self.getDimFromFile(featureFile,featureFileHandler)
+                stats    = _StreamVariance(self.dim)
+
+            samples = featureFileHandler.Read(featureFile)
+
+            print 'Process file : "{}"'.format(featureFile)
+            stats.AddX(samples)
+
+        print 'Read {} samples'.format(stats.GetNumberOfSamples())
+        self.mean           = stats.GetMean()
+        self.invStd         = stats.GetInvStandardDeviation()
+        self.populationSize = stats.GetNumberOfSamples()
+
+        return (self.mean,self.invStd)
+
+    def GetStatsFromFile(self,featureFile,featureFileHandler):
+        self.dim = self.getDimFromFile(featureFile,featureFileHandler)
+        stats = _StreamVariance(self.dim)
+
+        samples = featureFileHandler.Read(featureFile)
+        stats.AddX(samples)
+        self.mean           = stats.GetMean()
+        self.invStd         = stats.GetInvStandardDeviation()
+        self.populationSize = stats.GetNumberOfSamples()
+
+        return (self.mean,self.invStd)
+
+    def getDimFromFile(self,featureFile,featureFileHandler):
+        return featureFileHandler.GetDim(featureFile)
+
+    """
+
+    def Load(self,filename):
+        with open(filename,"rb") as f:
+            dt = numpy.dtype([('magicNumber',(numpy.int32,1)),('numSamples',(numpy.int32,1)),('dim',(numpy.int32,1))])
+            header = numpy.fromfile(f,dt,count=1)
+
+            if header[0]['magicNumber'] != 21812:
+                msg = 'File {} is not a stat file (wrong magic number)'
+                raise Exception(msg)
+
+            self.populationsize = header[0]['numSamples']
+            dim = header[0]['dim']
+
+            dt = numpy.dtype([('stats',(numpy.float32,dim))])
+            self.mean    = numpy.fromfile(f,dt,count=1)[0]['stats']
+            self.invStd  = numpy.fromfile(f,dt,count=1)[0]['stats']
+
+    def Save(self,filename):
+        with open(filename,'wb') as f:
+            dt = numpy.dtype([('magicNumber',(numpy.int32,1)),('numSamples',(numpy.int32,1)),('dim',(numpy.int32,1))])
+            header=numpy.zeros((1,),dtype=dt)
+            header[0]['magicNumber']=21812
+            header[0]['numSamples']=self.populationSize
+            header[0]['dim']=self.mean.shape[0]
+            header.tofile(f)
+
+            self.mean.astype(numpy.float32).tofile(f)
+            self.invStd.astype(numpy.float32).tofile(f)
+
+if __name__ == '__main__':
+
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Print the mean and standard deviation from a stat file',formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('filename',help="Name of the stat file")
+    args = parser.parse_args()
+    featureStats = FeatureStats()
+    featureStats.Load(args.filename)
+
+    numpy.set_printoptions(threshold='nan')
+    print("THIS IS THE MEAN: ")
+    print(featureStats.GetMean())
+    print("THIS IS THE INVERSE STD: ")
+    print(featureStats.GetInvStd())
+
+
