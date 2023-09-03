@@ -179,4 +179,79 @@ def _file2nnet(layers, set_layer_num = -1, filename='nnet.in', activation='sigmo
         logger.info("Loading final layer ")
 
         dict_key = 'logreg W'
-        layers[-1].params[0].
+        layers[-1].params[0].set_value(factors[-1] * np.asarray(string_2_array(nnet_dict[dict_key]), dtype=theano.config.floatX))
+        dict_key = 'logreg b'
+        layers[-1].params[1].set_value(np.asarray(string_2_array(nnet_dict[dict_key]), dtype=theano.config.floatX))
+        if gradients:
+            dict_key = 'logreg dW'
+            layers[-1].delta_params[0].set_value(np.asarray(string_2_array(nnet_dict[dict_key]), dtype=theano.config.floatX))
+            dict_key = 'logreg db'
+            layers[-1].delta_params[1].set_value(np.asarray(string_2_array(nnet_dict[dict_key]), dtype=theano.config.floatX))
+        else:
+            zero(layers[-1].delta_params[0])
+            zero(layers[-1].delta_params[1])
+
+        dict_key = 'logreg W_carry'
+        if layers[-1].kahan and dict_key in nnet_dict:
+            logger.info("Loading softmax kahan")
+            dict_key = 'logreg W_carry'
+            layers[-1].params_carry[0].set_value(np.asarray(string_2_array(nnet_dict[dict_key]), dtype=theano.config.floatX))
+            dict_key = 'logreg b_carry' 
+            layers[-1].params_carry[1].set_value(np.asarray(string_2_array(nnet_dict[dict_key]), dtype=theano.config.floatX))            
+            #dict_key = 'logreg dW_carry'
+            #layers[-1].delta_params_carry[0].set_value(np.asarray(string_2_array(nnet_dict[dict_key]), dtype=theano.config.floatX))
+            #dict_key = 'logreg db_carry' 
+            #layers[-1].delta_params_carry[1].set_value(np.asarray(string_2_array(nnet_dict[dict_key]), dtype=theano.config.floatX))            
+
+        if layers[-1].sync:
+            layers[-1].params_sync[0].set_value(layers[-1].params[0].get_value().astype('float32'))
+            layers[-1].params_sync[1].set_value(layers[-1].params[1].get_value().astype('float32'))
+            logger.info("Copy softmax params to sync")
+
+    if gradients:
+        logger.info("Loading gradients")
+    else:
+        logger.info("Zero-ing gradients")
+
+def _cnn2file(conv_layers, filename='nnet.out', activation='sigmoid', withfinal=True, input_factor = 1.0, factor=1.0):
+    n_layers = len(conv_layers)
+    nnet_dict = {}
+    for i in xrange(n_layers):
+       conv_layer = conv_layers[i]
+       filter_shape = conv_layer.filter_shape
+       
+       for next_X in xrange(filter_shape[0]):
+           for this_X in xrange(filter_shape[1]):
+               dict_a = 'W ' + str(i) + ' ' + str(next_X) + ' ' + str(this_X) 
+               if i == 0:
+                   nnet_dict[dict_a] = array_2_string(input_factor * (conv_layer.W.get_value())[next_X, this_X])
+               else:
+                   nnet_dict[dict_a] = array_2_string(factor * (conv_layer.W.get_value())[next_X, this_X])
+
+       dict_a = 'b ' + str(i)
+       nnet_dict[dict_a] = array_2_string(conv_layer.b.get_value())
+    
+    with open(filename, 'wb') as fp:
+        json.dump(nnet_dict, fp, indent=2, sort_keys = True)
+        fp.flush()
+
+def _file2cnn(conv_layers, filename='nnet.in', activation='sigmoid', withfinal=True, factor=1.0):
+    n_layers = len(conv_layers)
+    nnet_dict = {}
+
+    with open(filename, 'rb') as fp:
+        nnet_dict = json.load(fp)
+    for i in xrange(n_layers):
+        conv_layer = conv_layers[i]
+        filter_shape = conv_layer.filter_shape
+        W_array = conv_layer.W.get_value()
+
+        for next_X in xrange(filter_shape[0]):
+            for this_X in xrange(filter_shape[1]):
+                dict_a = 'W ' + str(i) + ' ' + str(next_X) + ' ' + str(this_X)
+                W_array[next_X, this_X, :, :] = factor * np.asarray(string_2_array(nnet_dict[dict_a]))
+
+        conv_layer.W.set_value(W_array) 
+
+        dict_a = 'b ' + str(i)
+        conv_layer.b.set_value(np.asarray(string_2_array(nnet_dict[dict_a]), dtype=theano.config.floatX)) 
