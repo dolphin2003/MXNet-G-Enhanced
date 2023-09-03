@@ -98,4 +98,16 @@ class speechSGD(mx.optimizer.Optimizer):
 
         grad = grad * self.rescale_grad
         if self.clip_gradient is not None:
-            grad = clip(grad, -self.clip_gradient, sel
+            grad = clip(grad, -self.clip_gradient, self.clip_gradient)
+
+        if state:
+            mom = state
+            mom[:] *= momentum
+            mom[:] += -lr * (1.0 - momentum) * (grad + wd * weight)
+            weight[:] += mom
+        else:
+            assert self.momentum == 0.0
+            weight[:] += -lr * (grad + self.wd * weight)
+
+
+
