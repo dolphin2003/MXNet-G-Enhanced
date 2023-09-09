@@ -206,4 +206,21 @@ class MXNET_API Engine {
       }, exec_ctx, const_vars, mutable_vars, prop, priority);
   }
 
- 
+ protected:
+  /*!
+   * \brief factory function to create OnComplete callback.
+   * \param callback th static callback function.
+   * \param param the paramter passed to callback.
+   */
+  inline CallbackOnComplete CreateCallback(
+      void (*callback)(Engine *, void *), void *param) {
+    CallbackOnComplete ret;
+    ret.callback_ = callback;
+    ret.engine_ = this;
+    ret.param_ = param;
+    return ret;
+  }
+};  // class Engine
+#endif  // DMLC_USE_CXX11
+}  // namespace mxnet
+#endif  // MXNET_ENGINE_H_
