@@ -229,4 +229,203 @@ class NDArray {
    *  not wrapped by NDArray(thus dependency not being tracked).
    *
    * \param data the data source to copyinto.
-   * \param size the 
+   * \param size the memory size we want to copy into, in sizeof(DType) not raw btyes.
+   */
+  void SyncCopyToCPU(void *data, size_t size) const;
+  /*!
+   * \brief Slice a NDArray
+   * \param begin begin index in first dim
+   * \param end end index in first dim
+   * \return sliced NDArray
+   */
+  inline NDArray Slice(index_t begin, index_t end) const {
+    NDArray ret = *this;
+    CHECK(!is_none()) << "NDArray is not initialized";
+    CHECK_GE(shape_[0], end) << "Slice end index out of range";
+    size_t length = shape_.ProdShape(1, shape_.ndim());
+    ret.offset_ += begin * length;
+    ret.shape_[0] = end - begin;
+    return ret;
+  }
+  /*!
+   * \brief Index a NDArray
+   * \param idx the index
+   * \return idx-th sub array NDArray
+   */
+  inline NDArray At(index_t idx) const {
+    NDArray ret = *this;
+    CHECK(!is_none()) << "NDArray is not initialized";
+    CHECK_GE(shape_[0], idx) << "index out of range";
+    size_t length = shape_.ProdShape(1, shape_.ndim());
+    ret.offset_ += idx * length;
+    ret.shape_ = TShape(shape_.data()+1, shape_.data()+shape_.ndim());
+    return ret;
+  }
+  /*!
+   * \brief Get an reshaped NDArray
+   * \param shape new shape
+   * \return NDArray in new shape
+   */
+  inline NDArray Reshape(const TShape &shape) const {
+    CHECK_GE(shape_.Size(), shape.Size())
+        << "NDArray.Reshape: target shape size is different from current shape";
+    NDArray ret = *this;
+    ret.shape_ = shape;
+    return ret;
+  }
+  /*!
+   * \brief Allocate the space if it is delayed allocated.
+   * This is an internal function used by system that normal user should not use
+   */
+  inline void CheckAndAlloc() const {
+    ptr_->CheckAndAlloc();
+  }
+  /*!
+   * \brief Save list of narray into the Stream.x
+   * \param fo The stream of output.
+   * \param data the NDArrays to be saved.
+   * \param names the name of the NDArray, optional, can be zero length.
+   */
+  static void Save(dmlc::Stream* fo,
+                   const std::vector<NDArray>& data,
+                   const std::vector<std::string>& names);
+  /*!
+   * \brief Load list of narray into from the stream.
+   * \param fi The stream of the input file.
+   * \param data the NDArrays to be loaded
+   * \param keys the name of the NDArray, if saved in the file.
+   */
+  static void Load(dmlc::Stream* fi,
+                   std::vector<NDArray>* data,
+                   std::vector<std::string>* keys);
+
+ private:
+  /*! \brief the real data chunk that backs NDArray */
+  struct Chunk {
+    /*! \brief storage handlefrom storage engine */
+    Storage::Handle shandle;
+    /*! \brief variable from engine */
+    Engine::VarHandle var;
+    /*!
+     * \brief if this is true, this means the data do not come
+     * from Storage, and do not need to be freed
+     */
+    bool static_data;
+    /*! \brief whether allocation is delayed */
+    bool delay_alloc;
+    /*! \brief default cosntructor */
+    Chunk() : static_data(true), delay_alloc(false) {
+      var  = Engine::Get()->NewVariable();
+    }
+    /*! \brief construct from static data */
+    Chunk(const TBlob &data, int dev_id)
+        : static_data(true),
+          delay_alloc(false) {
+      var = Engine::Get()->NewVariable();
+      if (data.dev_mask_ == cpu::kDevMask) {
+        shandle.ctx = Context::CPU();
+      } else {
+        CHECK_EQ(data.dev_mask_, gpu::kDevMask);
+        shandle.ctx = Context::GPU(dev_id);
+      }
+      shandle.dptr = data.dptr_;
+      shandle.size = data.shape_.Size() * mshadow::mshadow_sizeof(data.type_flag_);
+    }
+    /*! \brief construct a new chunk */
+    Chunk(uint64_t size, Context ctx, bool delay_alloc_, int dtype)
+        : static_data(false), delay_alloc(true) {
+      var = Engine::Get()->NewVariable();
+      shandle.size = size * mshadow::mshadow_sizeof(dtype);
+      shandle.ctx = ctx;
+      if (!delay_alloc_) this->CheckAndAlloc();
+    }
+    /*! \brief check if delay alloc is on, do alloc if not yet done */
+    inline void CheckAndAlloc(void) {
+      if (delay_alloc) {
+        shandle = Storage::Get()->Alloc(shandle.size, shandle.ctx);
+        delay_alloc = false;
+      }
+    }
+    /*! \brief destructor */
+    ~Chunk() {
+      if (static_data || delay_alloc) {
+        Engine::Get()->DeleteVariable([](RunContext s) {}, shandle.ctx, var);
+      } else {
+        Storage::Handle h = this->shandle;
+        Engine::Get()->DeleteVariable([h](RunContext s) {
+            Storage::Get()->Free(h);
+          }, shandle.ctx, var);
+      }
+    }
+  };
+  /*! \brief internal data of NDArray */
+  std::shared_ptr<Chunk> ptr_;
+  /*! \brief shape of current NDArray */
+  TShape shape_;
+  /*! \brief offset in chunk */
+  size_t offset_;
+  /*! \brief type of data */
+  int dtype_;
+};
+
+/*!
+ * \brief issue an copy operation from one NDArray to another
+ *  the two ndarray can sit on different devices
+ *  this operation will be scheduled by the engine
+ *
+ * \param from the ndarray we want to copy data from
+ * \param to the target ndarray
+ * \param priority Priority of the action.
+ * \note The function name explicitly marks the order of from and to
+ *     due to different possible convention carried by copy function.
+ */
+void CopyFromTo(const NDArray &from, NDArray *to, int priority = 0);
+
+/*!
+ * \brief copy a slice along any axis.
+ * \param from the NDArray we want to slice from
+ * \param slice_dim the axis we want to perform slice in
+ * \param start the beginning of the slice
+ * \param end the ending of the slice
+ * \param to the pre-allocated NDArray to copy the slice to
+ * \param priority the priority of the task
+ */
+void CopySliceTo(const NDArray &from, int slice_dim, index_t start, index_t end,
+                 NDArray *to, int priority = 0);
+
+/*!
+ * \brief Perform elementwise sum over each data from source, store result into out.
+ * \param source the ndarray we want to sum
+ * \param out the target ndarray
+ * \param priority Priority of the action.
+ */
+void ElementwiseSum(const std::vector<NDArray> &source, NDArray *out, int priority = 0);
+
+/*!
+ * \brief elementwise add
+ * \param lhs left operand
+ * \param rhs right operand
+ * \return a new result ndarray
+ */
+NDArray operator+(const NDArray &lhs, const NDArray &rhs);
+/*!
+ * \brief elementwise add
+ * \param lhs left operand
+ * \param rhs right operand
+ * \return a new result ndarray
+ */
+NDArray operator+(const NDArray &lhs, const real_t &rhs);
+/*!
+ * \brief elementwise substraction
+ * \param lhs left operand
+ * \param rhs right operand
+ * \return a new result ndarray
+ */
+NDArray operator-(const NDArray &lhs, const NDArray &rhs);
+/*!
+ * \brief elementwise substraction
+ * \param lhs left operand
+ * \param rhs right operand
+ * \return a new result ndarray
+ */
+NDArray operator-(const ND
