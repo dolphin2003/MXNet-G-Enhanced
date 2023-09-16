@@ -428,4 +428,165 @@ NDArray operator-(const NDArray &lhs, const NDArray &rhs);
  * \param rhs right operand
  * \return a new result ndarray
  */
-NDArray operator-(const ND
+NDArray operator-(const NDArray &lhs, const real_t &rhs);
+/*!
+ * \brief elementwise multiplication
+ * \param lhs left operand
+ * \param rhs right operand
+ * \return a new result ndarray
+ */
+NDArray operator*(const NDArray &lhs, const NDArray &rhs); \
+/*!
+ * \brief elementwise multiplication
+ * \param lhs left operand
+ * \param rhs right operand
+ * \return a new result ndarray
+ */
+NDArray operator*(const NDArray &lhs, const real_t &rhs);
+/*!
+ * \brief elementwise division
+ * \param lhs left operand
+ * \param rhs right operand
+ * \return a new result ndarray
+ */
+NDArray operator/(const NDArray &lhs, const NDArray &rhs);
+/*!
+ * \brief elementwise division
+ * \param lhs left operand
+ * \param rhs right operand
+ * \return a new result ndarray
+ */
+NDArray operator/(const NDArray &lhs, const real_t &rhs);
+
+/*!
+ * \brief Seed the random number generator.
+ * \param seed the seed to set to global random number generators.
+ */
+void RandomSeed(uint32_t seed);
+/*!
+ * \brief Sample uniform distribution for each elements of out.
+ * \param begin lower bound of distribution.
+ * \param end upper bound of distribution.
+ * \param out output NDArray.
+ */
+void SampleUniform(real_t begin, real_t end, NDArray *out);
+
+/*!
+ * \brief Sample gaussian distribution for each elements of out.
+ * \param mu mean of gaussian distribution.
+ * \param sigma standard deviation of gaussian distribution.
+ * \param out output NDArray.
+ */
+void SampleGaussian(real_t mu, real_t sigma, NDArray *out);
+//--------------------------------------------------------------
+// The following part are API Registration of NDArray functions.
+//--------------------------------------------------------------
+/*! \brief definition of NDArray function */
+typedef std::function<void (NDArray **used_vars,
+                            real_t *scalars,
+                            NDArray **mutate_vars,
+                            int num_params,
+                            char **param_keys,
+                            char **param_vals)> NDArrayAPIFunction;
+/*! \brief mask information on how functions can be exposed */
+enum NDArrayFunctionTypeMask {
+  /*! \brief all the use_vars should go before scalar */
+  kNDArrayArgBeforeScalar = 1,
+  /*! \brief all the scalar should go before use_vars */
+  kScalarArgBeforeNDArray = 1 << 1,
+  /*!
+   * \brief whether this function allows the handles in the target to
+   *  be empty NDArray that are not yet initialized, and will initialize
+   *  them when the function is invoked.
+   *
+   *  most function should support this, except copy between different
+   *  devices, which requires the NDArray to be pre-initialized with context
+   */
+  kAcceptEmptyMutateTarget = 1 << 2
+};
+/*! \brief Registry entry for NDArrayFunction */
+struct NDArrayFunctionReg
+    : public dmlc::FunctionRegEntryBase<NDArrayFunctionReg,
+                                        NDArrayAPIFunction> {
+  /*! \brief number of variable used by this function */
+  unsigned num_use_vars;
+  /*! \brief number of variable mutated by this function */
+  unsigned num_mutate_vars;
+  /*! \brief number of scalars used by this function */
+  unsigned num_scalars;
+  /*! \brief information on how function should be called from API */
+  int type_mask;
+  /*!
+   * \brief constructor
+   */
+  NDArrayFunctionReg()
+      : num_use_vars(0),
+        num_mutate_vars(0),
+        num_scalars(0),
+        type_mask(0) {}
+  /*!
+   * \brief set the function body to a NDArray setvalue function
+   *  this will also auto set the parameters correctly
+   * \param fsetvalue function body to set
+   * \return ref to the registered entry, used to set properties
+   */
+  inline NDArrayFunctionReg &set_function(void (*fsetvalue)(const real_t &rhs,
+                                                            NDArray *out)) {
+    body = [fsetvalue] (NDArray **used_vars, real_t *s, NDArray **mutate_vars,
+                        int num_params, char **param_keys, char **param_vals) {
+      (*fsetvalue)(s[0], mutate_vars[0]);
+    };
+    num_mutate_vars = 1; num_scalars = 1;
+    this->add_argument("src", "real_t", "Source input to the function.");
+    return *this;
+  }
+  /*!
+  * \brief set the function body to a ternary NDArray function
+  *  this will also auto set the parameters correctly
+  * \param fternary function body to set
+  * \return ref to the registered entry, used to set properties
+  */
+  inline NDArrayFunctionReg &set_function(void(*fternary)(const NDArray &lhs,
+                                                          const NDArray &mhs,
+                                                          const NDArray &rhs,
+                                                                NDArray *out)) {
+    body = [fternary](NDArray **used_vars,
+      real_t *s, NDArray **mutate_vars,
+      int num_params, char **param_keys, char **param_vals) {
+      (*fternary)(*used_vars[0], *used_vars[1], *used_vars[2], mutate_vars[0]);
+    };
+    num_use_vars = 3; num_mutate_vars = 1;
+    type_mask = kNDArrayArgBeforeScalar | kAcceptEmptyMutateTarget;
+    this->add_argument("lhs", "NDArray", "Left operand to the function.");
+    this->add_argument("mhs", "NDArray", "Middle operand to the function.");
+    this->add_argument("rhs", "NDArray", "Right operand to the function.");
+    return *this;
+  }
+  /*!
+   * \brief set the function body to a binary NDArray function
+   *  this will also auto set the parameters correctly
+   * \param fbinary function body to set
+   * \return ref to the registered entry, used to set properties
+   */
+  inline NDArrayFunctionReg &set_function(void (*fbinary)(const NDArray &lhs,
+                                                          const NDArray &rhs,
+                                                          NDArray *out)) {
+    body = [fbinary] (NDArray **used_vars, real_t *s, NDArray **mutate_vars,
+                      int num_params, char **param_keys, char **param_vals) {
+      (*fbinary)(*used_vars[0], *used_vars[1], mutate_vars[0]);
+    };
+    num_use_vars = 2; num_mutate_vars = 1;
+    type_mask = kNDArrayArgBeforeScalar | kAcceptEmptyMutateTarget;
+    this->add_argument("lhs", "NDArray", "Left operand to the function.");
+    this->add_argument("rhs", "NDArray", "Right operand to the function.");
+    return *this;
+  }
+  /*!
+   * \brief set the function body to a binary NDArray function
+   *  this will also auto set the parameters correctly
+   * \param fscalar function body to set
+   * \return ref to the registered entry, used to set properties
+   */
+  inline NDArrayFunctionReg &set_function(void (*fscalar)(const NDArray &lhs,
+                                                          const real_t &rhs,
+                     
