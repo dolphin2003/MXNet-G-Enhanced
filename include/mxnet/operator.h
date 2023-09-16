@@ -242,4 +242,156 @@ class OperatorProperty {
   /*!
    * \brief infer the data types of outputs and unknown input arguments
    * \param in_type the type of input arguments of the operator
-   *     this should be of same lengt
+   *     this should be of same length as the vector returned by DescribeArgs
+   *     in_type allows unknown elements, which are checked by type.ndim() == 0.
+   *     For unknown types, Infertype will try to fill in the correct type in in_type
+   *     For known types, Infertype will check type consistency
+   *
+   *     common practice: set the type of data input, and usually weight's type can be inferred
+   *
+   * \param out_type the type of outputs of the operator
+   *     Infertype will modify the vector to fill output Ttype
+   * \param aux_type the type of auxiliary states of the operator
+   *     Infertype will modify the vector to fill output Ttype
+   * \return true if the type inference is successful, false if there is not enough information.
+   * \throws dmlc::Error if the known arg_types are inconsistent.
+   */
+  virtual bool InferType(std::vector<int> *in_type,
+                          std::vector<int> *out_type,
+                          std::vector<int> *aux_type) const {
+    CHECK_LE(in_type->size(), this->ListArguments().size());
+    int n_in = this->ListArguments().size();
+    for (unsigned i = 0; i < in_type->size(); ++i) {
+      CHECK(in_type->at(i) == mshadow::default_type_flag ||
+            in_type->at(i) == -1) << "Unsupported data type " << in_type->at(i);
+    }
+    in_type->clear();
+    for (int i = 0; i < n_in; ++i ) in_type->push_back(mshadow::default_type_flag);
+
+    int n_out = this->ListOutputs().size();
+    out_type->clear();
+    for (int i = 0; i < n_out; ++i ) out_type->push_back(mshadow::default_type_flag);
+
+    int n_aux = this->ListAuxiliaryStates().size();
+    aux_type->clear();
+    for (int i = 0; i < n_aux; ++i ) aux_type->push_back(mshadow::default_type_flag);
+    return true;
+  }
+  /*!
+   * \brief Copy this OperatorProperty.
+   * \return a pointer to the copied OperatorProperty
+   */
+  virtual OperatorProperty* Copy() const = 0;
+  /*!
+   * \brief Create a Operator on specific context
+   */
+  virtual Operator* CreateOperator(Context ctx) const = 0;
+  /*!
+   * \brief Create a Operator on specific context and input shape/type
+   * \param ctx context of this operator
+   * \param in_shape shape of the input ndarrays
+   * \param in_type dtype of the input ndarrays
+   * \return the created operator
+   */
+  virtual Operator* CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+                                     std::vector<int> *in_type) const {
+    std::vector<int> out_type, aux_type;
+    std::vector<TShape> out_shape, aux_shape;
+    out_type.resize(this->ListOutputs().size());
+    out_shape.resize(this->ListOutputs().size());
+    aux_type.resize(this->ListAuxiliaryStates().size());
+    aux_shape.resize(this->ListAuxiliaryStates().size());
+    CHECK(InferType(in_type, &out_type, &aux_type));
+    CHECK(InferShape(in_shape, &out_shape, &aux_shape));
+    return CreateOperator(ctx);
+  }
+  /*!
+   * \brief return the type string of the Operator
+   *  subclasses override this function.
+   * \return The type string.
+   */
+  virtual std::string TypeString() const = 0;
+  //--------------------------------------------------------
+  // All the below functions are optional to override.
+  //--------------------------------------------------------
+  /*!
+   * \brief Declare additional resource required in forward pass.
+   *  These additional resources will be presented in OpContext.requested
+   *  in the same order of the returned Resource.
+   * \param in_shape The input shape to the operator, corresponds to shapes of in_data.
+   * \return Additional resource request
+   */
+  virtual std::vector<ResourceRequest> ForwardResource(
+      const std::vector<TShape> &in_shape) const {
+    return std::vector<ResourceRequest>();
+  }
+  /*!
+   * \brief Decalre additional resource required in backward pass.
+   *  These additional resources will be presented in OpContext.requested
+   *  in the same order of the returned Resource.
+   * \param in_shape The input shape to the operator, corresponds to shapes of in_data.
+   * \return Additional resource request
+   */
+  virtual std::vector<ResourceRequest> BackwardResource(
+      const std::vector<TShape> &in_shape) const {
+    return std::vector<ResourceRequest>();
+  }
+  /*!
+   * \brief Declare the input requirement of Backward pass.
+   *
+   *  Only the returned list of variables will be used in Backward.
+   *  This function is used for memory optimization.
+   *  It is adviced to override and only return what is actually needed.
+   *  If this function is not overriden, all the variables will be valid in Backward.
+   *
+   * \code
+   *  // The following code declares Backward need out_grad[0], in_data[0],in_data[1]
+   *  vector<int> BackwardInputs(const vector<int> &out_grad,
+   *                             const vector<int> &in_data,
+   *                             const vector<int> &out_data) const {
+   *    return {out_grad[0], in_data[0], in_data[1]};
+   *  }
+   * \endcode
+   * \param out_grad gradient of outputs in backward pass.
+   * \param in_data the input data in forward pass.
+   * \param out_data the output data in forward pass.
+   * \return an integer vector indicating the input requirments
+   * \sa BackwardInputs
+   */
+  virtual std::vector<int> DeclareBackwardDependency(
+      const std::vector<int> &out_grad,
+      const std::vector<int> &in_data,
+      const std::vector<int> &out_data) const {
+    // By default requires to see all the things.
+    // remember to override this function to get a better performance.
+    std::vector<int> ret = out_grad;
+    ret.insert(ret.end(), in_data.begin(), in_data.end());
+    ret.insert(ret.end(), out_data.begin(), out_data.end());
+    return ret;
+  }
+  /*!
+   * \brief Get possible forward inplace options.
+   *  This function enables optimization to reuse memory of inputs in output.
+   *  Only override when necessary, by default in-place is disabled.
+   *
+   *  The reason for void* type in the out_data is to distinguish the order
+   *  of mappings between the two, compiler will report error when
+   *  in_data and out_data's order in the pair get reversed.
+   *
+   * \code
+   *  // The following code says out_data[0] can share data with in_data[0]
+   *  vector<pair<int, void*> > ForwardInplaceOption(const vector<int> &in_data,
+   *                                                 const vector<void*> &out_data) const {
+   *    return {{in_data[0], out_data[0]}};
+   *  }
+   * \endcode
+   * \param in_data The input data in forward pass.
+   * \param out_data The output data in forward pass.
+   * \return list of pair of that maps input->output,
+   *   indicating possible in place operations.
+   */
+  virtual std::vector<std::pair<int, void*> > ForwardInplaceOption(
+      const std::vector<int> &in_data,
+      const std::vector<void*> &out_data) const {
+    return std::vector<std::pair<int, void*> >();
+ 
