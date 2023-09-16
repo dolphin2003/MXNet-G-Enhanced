@@ -95,3 +95,151 @@ class Operator {
   /*! \brief destructor */
   virtual ~Operator() {}
   /*!
+   * \brief perform a forward operation of Operator, save the output to TBlob.
+   * \param ctx runtime context available to this call
+   * \param in_data array of input data, it is const
+   * \param req the request types of saving operation, can only be kWriteTo or kWriteInplace.
+   * \param out_data array of output data, pointer is used to indicate that this is holder
+   *        the space of TBlob in out_data must be pre-allocated with InferShape
+   * \param aux_states Auxiliary states of operator. Normally operator doesn't
+   *        need, epecial case like Batch Norm requires.
+   * \sa OpReqType, OpContext
+   */
+  virtual void Forward(const OpContext &ctx,
+                       const std::vector<TBlob> &in_data,
+                       const std::vector<OpReqType> &req,
+                       const std::vector<TBlob> &out_data,
+                       const std::vector<TBlob> &aux_states) = 0;
+  /*!
+   * \brief Perform a Backward Operation, write gradient to the in_grad.
+   *
+   * \note
+   * Convention:
+   *   out_grad.size() == OperatorProperty.NumVisibleOutputs()
+   *   out_data.size() == OperatorProperty.NumOutputs()
+   * out_data can contain additional invisible returns that remembers the
+   * state carried from the Forward pass. For example mask in the dropout.
+   * The gradients are passed from visible returns in this function.
+   *
+   * \par
+   * Not all the TBlobs in the arguments will be available
+   * if you override the DeclareBackwardDependency of corresponding OperatorProperty class.
+   * Only the dependencies you declared will be available at corresponding position,
+   * the rest of the parameters are simply dummy where you will get a nullptr.
+   * You will be safe if you use the default DeclareBackwardDependency.
+   * But only declare what you need will give engine more chance for optimization.
+   *
+   * \param ctx runtime context available to this call
+   * \param out_grad the gradient value we get from of the Operator.
+   * \param in_data the array of input data.
+   * \param out_data the array of output data.
+   * \param req request types of the saving operation, can be all types.
+   * \param in_grad the array of gradient we need to write to.
+   * \param aux_states Auxiliary states of operator. Normally operator doesn't need
+   * \sa OperatorProperty, OpReqType, OpContext
+   */
+  virtual void Backward(const OpContext &ctx,
+                        const std::vector<TBlob> &out_grad,
+                        const std::vector<TBlob> &in_data,
+                        const std::vector<TBlob> &out_data,
+                        const std::vector<OpReqType> &req,
+                        const std::vector<TBlob> &in_grad,
+                        const std::vector<TBlob> &aux_states) {
+    LOG(FATAL) << "Backward is not implemented";
+  }
+  /*! \return execution type of the operator */
+  virtual ExecType exec_type() const {
+    return kSync;
+  }
+};
+
+#if DMLC_USE_CXX11
+// OperatorProperty allows C++11, while Operator do not rely on it.
+/*!
+ * \brief OperatorProperty is a object that stores all information about Operator.
+ * It also contains method to generate context(device) specific operators.
+ *
+ * It also contains various functions that can be optimally overriden to
+ * provide optimization chance for computation engine.
+ */
+class OperatorProperty {
+ public:
+  /*!
+   * \brief virtual destructor
+   */
+  virtual ~OperatorProperty() {}
+  /*!
+   *  \brief Initialize the Operator by setting the parameters
+   *  This function need to be called before all other functions.
+   *  \param kwargs the keyword arguments parameters
+   */
+  virtual void Init(const std::vector<std::pair<std::string, std::string> >& kwargs) = 0;
+  /*!
+   * \brief Get a map representation of internal parameters.
+   *  This can be used by Init to recover the state of OperatorProperty.
+   */
+  virtual std::map<std::string, std::string> GetParams() const = 0;
+  /*!
+   * \brief Get input arguments of the Operator.
+   * \return vector of arguments.
+   */
+  virtual std::vector<std::string> ListArguments() const {
+    return {"data"};
+  }
+  /*!
+   * \brief Get name of output values of Operator
+   * \return name of output values.
+   */
+  virtual std::vector<std::string> ListOutputs() const {
+    return {"output"};
+  }
+  /*!
+   * \brief Get name of auxilary states of Operator
+   * \return name of return values.
+   */
+  virtual std::vector<std::string> ListAuxiliaryStates() const {
+    return {};
+  }
+  /*! \return number of real return values of the Operator */
+  virtual int NumOutputs() const {
+    return this->ListOutputs().size();
+  }
+  /*!
+   * \brief get number of visible return values during Symbol creation.
+   *  If NumVisibleOutputs() = k, and NumOutputs() = n.
+   *  The first k returns will be presented in the resulting symbol.
+   *
+   *  The rest of the returns can be used for auxiliary states for Backward.
+   *  For example, Dropout will return [data, mask], with NumVisibleOutputs() == 1.
+   *  So when user call sym = Dropout(input), only data is presented in sym.
+   *  But all the returns will be presented in out_data parameter of Backward if requested.
+   *
+   * \return number of default return values
+   */
+  virtual int NumVisibleOutputs() const {
+    return NumOutputs();
+  }
+  /*!
+   * \brief infer the shapes of outputs and unknown input arguments
+   * \param in_shape the shape of input arguments of the operator
+   *     this should be of same length as the vector returned by DescribeArgs
+   *     in_shape allows unknown elements, which are checked by shape.ndim() == 0.
+   *     For unknown shapes, InferShape will try to fill in the correct Shape in in_shape
+   *     For known shapes, InferShape will check shape consistency
+   *
+   *     common practice: set the shape of data input, and usually weight's shape can be inferred
+   *
+   * \param out_shape the shape of outputs of the operator
+   *     InferShape will modify the vector to fill output TShape
+   * \param aux_shape the shape of auxiliary states of the operator
+   *     InferShape will modify the vector to fill output TShape
+   * \return true if the shape inference is successful, false if there is not enough information.
+   * \throws dmlc::Error if the known arg_shapes are inconsistent.
+   */
+  virtual bool InferShape(std::vector<TShape> *in_shape,
+                          std::vector<TShape> *out_shape,
+                          std::vector<TShape> *aux_shape) const = 0;
+  /*!
+   * \brief infer the data types of outputs and unknown input arguments
+   * \param in_type the type of input arguments of the operator
+   *     this should be of same lengt
