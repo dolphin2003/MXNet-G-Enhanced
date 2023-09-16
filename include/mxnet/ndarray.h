@@ -589,4 +589,107 @@ struct NDArrayFunctionReg
    */
   inline NDArrayFunctionReg &set_function(void (*fscalar)(const NDArray &lhs,
                                                           const real_t &rhs,
-                     
+                                                          NDArray *out)) {
+    body = [fscalar] (NDArray **used_vars, real_t *s, NDArray **mutate_vars,
+                      int num_params, char **param_keys, char **param_vals) {
+      (*fscalar)(*used_vars[0], s[0], mutate_vars[0]);
+    };
+    num_use_vars = 1; num_mutate_vars = 1; num_scalars = 1;
+    type_mask = kNDArrayArgBeforeScalar | kAcceptEmptyMutateTarget;
+    this->add_argument("lhs", "NDArray", "Left operand to the function.");
+    this->add_argument("rhs", "real_t", "Right operand to the function.");
+    return *this;
+  }
+  /*!
+   * \brief set the function body to a unary NDArray function
+   *  this will also auto set the parameters correctly
+   * \param funary function body to set
+   * \return ref to the registered entry, used to set properties
+   */
+  inline NDArrayFunctionReg &set_function(void (*funary)(const NDArray &src,
+                                                         NDArray *out)) {
+    body = [funary] (NDArray **used_vars, real_t *s, NDArray **mutate_vars,
+                     int num_params, char **param_keys, char **param_vals) {
+      (*funary)(*used_vars[0], mutate_vars[0]);
+    };
+    num_use_vars = 1; num_mutate_vars = 1;
+    type_mask = kNDArrayArgBeforeScalar | kAcceptEmptyMutateTarget;
+    this->add_argument("src", "NDArray", "Source input to the function.");
+    return *this;
+  }
+  /*!
+   * \brief set the function body to a unary NDArray function
+   *  this will also auto set the parameters correctly
+   * \param fgeneric function body to set
+   * \return ref to the registered entry, used to set properties
+   */
+  inline NDArrayFunctionReg &set_function(
+    void (*fgeneric)(NDArray **used_vars,
+                     real_t *s,
+                     NDArray **mutate_vars,
+                     const std::map<std::string, std::string>& param)) {
+    body = [fgeneric] (NDArray **used_vars, real_t *s, NDArray **mutate_vars,
+                       int num_params, char **param_keys, char **param_vals) {
+      std::map<std::string, std::string> param;
+      for (int i = 0; i < num_params; ++i) {
+        param[param_keys[i]] = param_vals[i];
+      }
+      fgeneric(used_vars, s, mutate_vars, param);
+    };
+    return *this;
+  }
+  /*!
+   * \brief set the number of mutate variables
+   * \param n number of mutate variablesx
+   * \return ref to the registered entry, used to set properties
+   */
+  inline NDArrayFunctionReg &set_num_use_vars(unsigned n) {
+    num_use_vars = n; return *this;
+  }
+  /*!
+   * \brief set the number of mutate variables
+   * \param n number of mutate variablesx
+   * \return ref to the registered entry, used to set properties
+   */
+  inline NDArrayFunctionReg &set_num_mutate_vars(unsigned n) {
+    num_mutate_vars = n; return *this;
+  }
+  /*!
+   * \brief set the number of scalar arguments
+   * \param n number of scalar arguments
+   * \return ref to the registered entry, used to set properties
+   */
+  inline NDArrayFunctionReg &set_num_scalars(unsigned n) {
+    num_scalars = n; return *this;
+  }
+  /*!
+   * \brief set type mask
+   * \param tmask typemask
+   * \return ref to the registered entry, used to set properties
+   */
+  inline NDArrayFunctionReg &set_type_mask(int tmask) {
+    type_mask = tmask; return *this;
+  }
+};  // NDArrayFunctionReg
+
+/*!
+ * \brief Macro to register NDArray function
+ *
+ * Example: the following code is example to register a plus
+ * \code
+ *
+ * REGISTER_NDARRAY_FUN(Plus)
+ * .set_function(Plus);
+ *
+ * \endcode
+ */
+#define MXNET_REGISTER_NDARRAY_FUN(name)                                 \
+  DMLC_REGISTRY_REGISTER(::mxnet::NDArrayFunctionReg, NDArrayFunctionReg, name)
+
+}  // namespace mxnet
+
+namespace dmlc {
+/*!\brief traits */
+DMLC_DECLARE_TRAITS(has_saveload, mxnet::NDArray, true);
+}  // namespace dmlc
+#endif  // MXNET_NDARRAY_H_
