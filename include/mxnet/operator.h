@@ -394,4 +394,152 @@ class OperatorProperty {
       const std::vector<int> &in_data,
       const std::vector<void*> &out_data) const {
     return std::vector<std::pair<int, void*> >();
- 
+  }
+  /*!
+   * \brief Get possible backward inplace options.
+   *  This function enables optimization to reuse memory of inputs in output.
+   *  Only override when necessary, by default in-place is disabled.
+   *
+   *  The reason for void* type in the in_grad is to distinguish the order
+   *  of mappings between the two, compiler will report error when
+   *  in_data and out_data's order in the pair get reversed.
+   *
+   * \code
+   *  // The following code says in_grad[0] can share data with in_data[0]
+   *  vector<pair<int,int> > BackwardInplaceOption(
+   *                 const std::vector<int> &out_grad,
+   *                 const std::vector<int> &in_data,
+   *                 const std::vector<int> &out_data,
+   *                 const std::vector<int> &in_grad) const {
+   *    return {in_data[0], in_grad[0]}};
+   *  }
+   * \endcode
+   * \param in_data The input data in forward pass.
+   * \param out_data The output data in forward pass.
+   * \param in_grad Gradient of inputs in backward pass.
+   * \param out_grad Gradient of outputs in backward pass.
+   * \return list of pair of that maps input->output,
+   *   indicating possible in place operations.
+   */
+  virtual std::vector<std::pair<int, void*> > BackwardInplaceOption(
+      const std::vector<int> &out_grad,
+      const std::vector<int> &in_data,
+      const std::vector<int> &out_data,
+      const std::vector<void*> &in_grad) const {
+    return std::vector<std::pair<int, void*> >();
+  }
+  /*!
+   * \brief Get Backward Input Dependency for generic types of data.
+   *  Normally T can be pointer of Symbol::DataEntry, or NDArray.
+   *  This function will select the result list of T according to DeclareBackwardDependency.
+   *
+   * \param in_data the input data in forward pass.
+   * \param out_data the output data in forward pass.
+   * \param out_grad gradient of outputs in backward pass.
+   * \tparam T the generic type parameter.
+   * \return vector of inputs the Backward Operation depends on.
+   * \sa DeclareBackwardDependency
+   */
+  template<typename T>
+  inline std::vector<T> BackwardInputs(const std::vector<T> &out_grad,
+                                       const std::vector<T> &in_data,
+                                       const std::vector<T> &out_data) const {
+    int counter = 0;
+    std::vector<int> out_grad_index(out_grad.size());
+    std::vector<int> in_data_index(in_data.size());
+    std::vector<int> out_data_index(out_data.size());
+    for (size_t i = 0; i < out_grad_index.size(); ++i) {
+      out_grad_index[i] = counter++;
+    }
+    for (size_t i = 0; i < in_data_index.size(); ++i) {
+      in_data_index[i] = counter++;
+    }
+    for (size_t i = 0; i < out_data_index.size(); ++i) {
+      out_data_index[i] = counter++;
+    }
+    std::vector<T> all_data;
+    all_data.insert(all_data.end(), out_grad.begin(), out_grad.end());
+    all_data.insert(all_data.end(), in_data.begin(), in_data.end());
+    all_data.insert(all_data.end(), out_data.begin(), out_data.end());
+
+    std::vector<int> ret_index = this->DeclareBackwardDependency(
+        out_grad_index, in_data_index, out_data_index);
+
+    std::vector<T> ret(ret_index.size());
+    for (size_t i = 0; i < ret_index.size(); ++i) {
+      ret[i] = all_data[ret_index[i]];
+    }
+    return ret;
+  }
+  /*!
+   * \brief create OperatorProperty
+   * \param type_name the type string of the OperatorProperty
+   * \return a new constructed OperatorProperty
+   */
+  static OperatorProperty *Create(const char* type_name);
+};
+
+/*! \brief typedef the factory function of operator property */
+typedef std::function<OperatorProperty *()> OperatorPropertyFactory;
+/*!
+ * \brief Registry entry for OperatorProperty factory functions.
+ */
+struct OperatorPropertyReg
+    : public dmlc::FunctionRegEntryBase<OperatorPropertyReg,
+                                        OperatorPropertyFactory> {
+  /*!
+   * \brief Set key_var_num_args
+   *  When this is set, the API caller is required to pass in a
+   *  argument with key=key_num_args.c_str(), and value=num_args.
+   *  num_args is number of positional argument when calling the function.
+   *
+   *  This is used to pass in length of positional arguments
+   *  for operators that can take variable length of input.
+   *  Most operators do not need to set this property.
+   *
+   * \param key the key name to be set
+   */
+  inline OperatorPropertyReg& set_key_var_num_args(const std::string &key) {  // NOLINT(*)
+    this->key_var_num_args = key;
+    return *this;
+  }
+  /*!
+   * \brief Check if TypeString of the type matches the registered name
+   */
+  inline OperatorPropertyReg& check_name() {
+    OperatorProperty *p = this->body();
+    std::string type = p->TypeString();
+    delete p;
+    CHECK_EQ(this->name, type)
+        << "Register Name and TypeString mismatch, name=\"" << this->name << "\","
+        << " but TypeString=\"" << type <<"\"";
+    return *this;
+  }
+
+  /*! \brief The key num_args name. */
+  std::string key_var_num_args;
+};
+
+//---------------------------------------------------------------------------------
+// The following part are API Registration of Operators
+// See also MXNET_REGISTER_SIMPLE_OP in operator_util.h for registering simple ops.
+//---------------------------------------------------------------------------------
+/*!
+ * \brief Macro to register OperatorProperty
+ *
+ * \code
+ * // example of registering a fully connected operator
+ * REGISTER_OP_PROPERTY(FullyConnected, FullyConnectedOpProp)
+ * .describe("Fully connected layer");
+ *
+ * \endcode
+ */
+#define MXNET_REGISTER_OP_PROPERTY(name, OperatorPropertyType)          \
+  DMLC_REGISTRY_REGISTER(::mxnet::OperatorPropertyReg, OperatorPropertyReg, name) \
+  .set_body([]() { return new OperatorPropertyType(); })                \
+  .set_return_type("Symbol") \
+  .check_name()
+
+#endif  // DMLC_USE_CXX11
+}  // namespace mxnet
+#endif  // MXNET_OPERATOR_H_
