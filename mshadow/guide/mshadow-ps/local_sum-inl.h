@@ -1,43 +1,27 @@
-/**
- * @brief  Simple test of KVLayer
- */
-#include "ps.h"
-#include "parameter/kv_layer.h"
+
+// This is an example demonstrating the usage of mshadow ps
 #include <cstdio>
-#include <iostream>
+// use openmp to launch multiple threads
 #include <omp.h>
-#include <map>
 #include <mshadow/tensor.h>
 #include <mshadow-ps/mshadow_ps.h>
-#include "dbstr.h"
-#include "glog/logging.h"
 
-namespace mshadow {
-namespace ps {
-
-
-template<typename DType>
-class Updater : public IModelUpdater<DType> {
- protected:
-  void InitModel_(int key, Tensor<cpu, 1, DType> data) {
-    data = 0;
-    data_[key] = data;
+// simple util to print result
+void Print_(mshadow::Tensor<mshadow::cpu, 2, float> ts) {
+  for (mshadow::index_t i = 0; i < ts.size(0); ++i) {
+    for (mshadow::index_t j = 0; j < ts.size(1); ++j) {
+      printf("%g ", ts[i][j]);
+    }
+    printf("\n");
   }
-
-  void Update_(int key, Tensor<cpu, 1, DType> data) {
-    data_[key] += data;
-    // LOG(ERROR) << dbstr(data_[key]);
-  }
-  std::map<int, Tensor<cpu, 1, DType> > data_;
-};
-
-template<typename DType>
-IModelUpdater<DType> *CreateModelUpdater(void) {
-  return new Updater<DType>();
 }
-
-}  // namespace ps
-}  // namespace mshadow
+template<typename xpu>
+inline void Print(mshadow::Tensor<xpu, 2, float> ts) {
+  mshadow::TensorContainer<mshadow::cpu, 2, float> tmp;
+  tmp.Resize(ts.shape_);
+  mshadow::Copy(tmp, ts);
+  Print_(tmp);
+}
 
 // this function is runed by specific thread
 template<typename xpu>
@@ -52,22 +36,17 @@ inline void RunWorkerThread(int devid,
   // this will make subsequent computation whose target is data
   // to use the stream, stream is needed for async execution in GPU
   data.set_stream(stream);
+  // assume these operations sets the content of dataient
+  data[0] = 1.0f;
+  data[1] = devid + data[0];
+  printf("dev%d: before sync, data:\n", devid);
+  // use print to show result, do not call
+  // print normally since Copy will block
+  Print(data);
+  printf("====================\n");
   // intiaialize the key, register the shape on parameter server
   ps->InitKey(data[0].shape_, 0, devid);
   ps->InitKey(data[1].shape_, 1, devid);
-  // first step, pull the data back from server
-  ps->PullReq(data[0], 0, devid);
-  ps->PullReq(data[1], 1, devid);
-
-  // PullWait will block until these request finishes
-  ps->PullWait(0, devid);
-  ps->PullWait(1, devid);
-
-  data[1] = devid + data[0];
-
-  LOG(ERROR) << "node " << ::ps::MyNodeID() << ", dev " << devid << ": before sync\n"
-             << dbstr(data);
-
   // push data[0] out, for update, or aggregation
   // 0 is the key of the data, devid is the current device id
   ps->Push(data[0], 0, devid);
@@ -77,20 +56,32 @@ inline void RunWorkerThread(int devid,
   // computation can be done here..
   // the pull request handler will be overlapped with
   // similar as previous call
-  ps->PullWait(0, devid);
-
   ps->Push(data[1], 1, devid);
   ps->PullReq(data[1], 1, devid);
   // more computation can be done here...
   // the computation will be overlapped
   // PullWait will block until these request finishes
+  ps->PullWait(0, devid);
   ps->PullWait(1, devid);
-
-  LOG(ERROR) << "node " << ::ps::MyNodeID() << ", dev " << devid
-             << ": after sync\n" << dbstr(data);
-
+  printf("dev%d: after sync, data:\n", devid);
+  // use print to show result, do not call
+  // print normally since Copy will block
+  Print(data);
+  printf("====================\n");
   mshadow::DeleteStream(stream);
   mshadow::ShutdownTensorEngine<xpu>();
+}
+
+namespace mshadow {
+namespace ps {
+// model updater is used when update is happening on server side
+// if we only use parameter server for sum aggregation
+// this is not needed, but we must declare this function to return NULL
+template<>
+IModelUpdater<float> *CreateModelUpdater(void) {
+  return NULL;
+}
+}
 }
 
 template<typename xpu>
@@ -101,6 +92,9 @@ inline int Run(int argc, char *argv[]) {
            "\tfor GPU the device list need to be actual device index\n");
     return 0;
   }
+#if MSHADOW_RABIT_PS
+  rabit::Init(argc, argv);
+#endif
   // list of device ids
   std::vector<int> devs;
   // initialization
@@ -109,9 +103,8 @@ inline int Run(int argc, char *argv[]) {
     devs.push_back(atoi(argv[i]));
   }
   mshadow::ps::ISharedModel<xpu, float>
-      *ps = mshadow::ps::CreateSharedModel<xpu, float>("dist");
+      *ps = mshadow::ps::CreateSharedModel<xpu, float>("local");
   // intiaialize the ps
-  ps->SetParam("update_on_server", "1");
   ps->Init(devs);
   // use openmp to launch #devs threads
   #pragma omp parallel num_threads(devs.size())
@@ -120,5 +113,8 @@ inline int Run(int argc, char *argv[]) {
     RunWorkerThread<xpu>(devs[tid], ps);
   }
   delete ps;
+#if MSHADOW_RABIT_PS
+  rabit::Finalize();
+#endif
   return 0;
 }
