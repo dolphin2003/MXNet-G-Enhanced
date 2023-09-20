@@ -237,4 +237,46 @@ int main(int argc, char *argv[]) {
   // data
   TensorContainer<cpu, 2, real_t> xtrain_, xtest_;
   LoadMNIST("train-images-idx3-ubyte", "train-labels-idx1-ubyte", ytrain, xtrain_, true);
-  LoadMNIST("t10k-images-idx3-ubyte", "t10k-l
+  LoadMNIST("t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte", ytest, xtest_, false);
+
+  TensorContainer<cpu, 4, real_t> xtrain(Shape4(xtrain_.size(0), 1, insize, insize));
+  TensorContainer<cpu, 4, real_t> xtest(Shape4(xtest_.size(0),  1, insize, insize));
+  xtrain = reshape(xtrain_, xtrain.shape_);
+  xtest = reshape(xtest_, xtest.shape_);
+
+  int num_iter = 20;
+
+  for (int i = 0; i < num_iter; ++ i) {
+    // training
+    for (index_t j = 0; j + batch_size <= xtrain.size(0); j += batch_size) {
+      net->Forward(xtrain.Slice(j, j + batch_size), pred);
+      // set gradient into pred
+      for (int k = 0; k < batch_size; ++ k) {
+        pred[k][ ytrain[k+j] ] -= 1.0f;
+      }
+      // scale gradient by batchs zie
+      pred *= 1.0f / batch_size;
+      // run backprop
+      net->Backprop(pred);
+      // update net parameters
+      net->Update();
+    }
+    // evaluation
+    long nerr = 0;
+    for (index_t j = 0; j + batch_size <= xtest.size(0); j += batch_size) {
+      net->Forward(xtest.Slice(j, j + batch_size), pred);
+      for (int k = 0; k < batch_size; ++ k) {
+        nerr += MaxIndex(pred[k]) != ytest[j+k];
+      }
+    }
+    printf("round %d: test-err=%f\n", i, (float)nerr/xtest.size(0));
+  }
+  delete net;
+
+  if (!strcmp(argv[1], "gpu")) {
+    ShutdownTensorEngine<gpu>();
+  } else {
+    ShutdownTensorEngine<cpu>();
+  }
+  return 0;
+}
