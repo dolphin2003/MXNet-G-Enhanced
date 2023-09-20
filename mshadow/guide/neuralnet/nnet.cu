@@ -168,4 +168,35 @@ int main(int argc, char *argv[]) {
 
   for (int i = 0; i < num_iter; ++ i) {
     // training
-    for (
+    for (index_t j = 0; j + batch_size <= xtrain.size(0); j += batch_size) {
+      net->Forward(xtrain.Slice(j, j + batch_size), pred);
+      // set gradient into pred
+      for (int k = 0; k < batch_size; ++ k) {
+        pred[k][ ytrain[k+j] ] -= 1.0f;
+      }
+      // scale gradient by batchs zie
+      pred *= 1.0f / batch_size;
+      // run backprop
+      net->Backprop(pred);
+      // update net parameters
+      net->Update();
+    }
+    // evaluation
+    long nerr = 0;
+    for (index_t j = 0; j + batch_size <= xtest.size(0); j += batch_size) {
+      net->Forward(xtest.Slice(j, j + batch_size), pred);
+      for (int k = 0; k < batch_size; ++ k) {
+        nerr += MaxIndex(pred[k]) != ytest[j+k];
+
+      }
+    }
+    printf("round %d: test-err=%f\n", i, (float)nerr/xtest.size(0));
+  }
+  delete net;
+  if (!strcmp(argv[1], "gpu")) {
+    ShutdownTensorEngine<gpu>();
+  } else {
+    ShutdownTensorEngine<cpu>();
+  }
+  return 0;
+}
