@@ -185,4 +185,153 @@ struct BLASEngine<cpu, float> {
                          int n,
                          const float* X, int incX,
                          const float* Y, int incY,
-      
+                         float* ret) {
+    LOG(FATAL) << "Not implmented!";
+  }
+};
+
+template<>
+struct BLASEngine<cpu, double> {
+  inline static bool GetT(bool t) {
+    return t ? true : false;
+  }
+  inline static void SetStream(Stream<cpu> *stream) {
+  }
+  inline static void gemm(Stream<cpu> *stream,
+                          bool transa, bool transb,
+                          int m, int n, int k, double alpha,
+                          const double *A, int lda, const double *B, int ldb,
+                          double beta, double *C, int ldc) {
+    if (alpha == 1.0f && beta == 0.0f) {
+      bool transpose_left = transb;
+      bool transpose_right = transa;
+      Tensor<cpu, 2, double> lhs((double*)B, Shape2(transpose_left ? k : n, transpose_left ? n : k));  // NOLINT(*)
+      Tensor<cpu, 2, double> rhs((double*)A, Shape2(transpose_right ? m : k, transpose_right ? k : m));  // NOLINT(*)
+      Tensor<cpu, 2, double> dst(C, Shape2(m, n));
+      if (!transpose_left && !transpose_right) {
+        dst = expr::implicit_dot(lhs, rhs); return;
+      } else if (!transpose_left && transpose_right) {
+        dst = expr::implicit_dot(lhs, rhs.T()); return;
+      } else if (transpose_left && !transpose_right) {
+        dst = expr::implicit_dot(lhs.T(), rhs); return;
+      } else {
+        LOG(FATAL) << "Not implmented!";
+      }
+    } else {
+      LOG(FATAL) << "Not implmented!";
+    }
+  }
+  inline static void batched_gemm(Stream<cpu> *stream,
+                                  bool transa, bool transb,
+                                  int m, int n, int k, double alpha,
+                                  const double *A, int lda, const double *B, int ldb,
+                                  double beta, double *C, int ldc, int batch_count,
+                                  double **workspace) {
+    for (int i = 0; i < batch_count; ++i) {
+      gemm(stream, transa, transb, m, n, k, alpha,
+           A + i * m * k, lda, B + i * k * n, ldb,
+           beta, C + i * m * n, ldc);
+    }
+  }
+  inline static void gemv(Stream<cpu> *stream,
+                          bool trans, int m, int n,
+                          double alpha, const double *A, int lda,
+                          const double *X, int incX,
+                          double beta, double *Y, int incY) {
+    LOG(FATAL) << "Not implmented!";
+  }
+  inline static void batched_gemv(Stream<cpu> *stream,
+                                  bool trans, int m, int n,
+                                  double alpha, const double *A, int lda,
+                                  const double *X, int incX,
+                                  double beta, double *Y, int incY, int batch_count) {
+    LOG(FATAL) << "Not implmented!";
+  }
+  inline static void ger(Stream<cpu> *stream,
+                         int m, int n, double alpha,
+                         const double *X, int incX,
+                         const double *Y, int incY, double *A, int lda) {
+    LOG(FATAL) << "Not implmented!";
+  }
+  inline static void batched_ger(Stream<cpu> *stream,
+                         int m, int n, double alpha,
+                         const double *X, int incX,
+                         const double *Y, int incY, double *A, int lda, int batch_count) {
+    LOG(FATAL) << "Not implmented!";
+  }
+  inline static void dot(Stream<cpu> *stream,
+                         int n,
+                         const double* X, int incX,
+                         const double* Y, int incY,
+                         double* ret) {
+    LOG(FATAL) << "Not implmented!";
+  }
+};
+
+#elif (MSHADOW_USE_MKL || MSHADOW_USE_CBLAS)  // NOLINT(*)
+template<>
+struct BLASEngine<cpu, float> {
+  inline static CBLAS_TRANSPOSE GetT(bool t) {
+    return t ? CblasTrans : CblasNoTrans;
+  }
+  inline static void SetStream(Stream<cpu> *stream) {
+  }
+  inline static void gemm(Stream<cpu> *stream,
+                          bool transa, bool transb,
+                          int m, int n, int k, float alpha,
+                          const float *A, int lda, const float *B, int ldb,
+                          float beta, float *C, int ldc) {
+    cblas_sgemm(CblasColMajor, GetT(transa), GetT(transb),
+                m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+  }
+  inline static void batched_gemm(Stream<cpu> *stream,
+                                  bool transa, bool transb,
+                                  int m, int n, int k, float alpha,
+                                  const float *A, int lda, const float *B, int ldb,
+                                  float beta, float *C, int ldc, int batch_count,
+                                  float **workspace) {
+    for (int i = 0; i < batch_count; ++i) {
+      gemm(stream, transa, transb, m, n, k, alpha,
+           A + i * m * k, lda, B + i * k * n, ldb,
+           beta, C + i * m * n, ldc);
+    }
+  }
+  inline static void gemv(Stream<cpu> *stream,
+                          bool trans, int m, int n,
+                          float alpha, const float *A, int lda,
+                          const float *X, int incX,
+                          float beta, float *Y, int incY) {
+    cblas_sgemv(CblasColMajor, GetT(trans), m, n, alpha,
+                A, lda, X, incX, beta, Y, incY);
+  }
+  inline static void batched_gemv(Stream<cpu> *stream,
+                                  bool trans, int m, int n,
+                                  float alpha, const float *A, int lda,
+                                  const float *X, int incX,
+                                  float beta, float *Y, int incY, int batch_count) {
+    for (int i = 0; i < batch_count; ++i) {
+      gemv(stream, trans, m, n, alpha, A + i * m * n, lda,
+           X + i * (trans ? m : n) * incX, incX,
+           beta, Y + i * (trans ? n : m) * incY, incY);
+    }
+  }
+  inline static void ger(Stream<cpu> *stream,
+                         int m, int n, float alpha,
+                         const float *X, int incX,
+                         const float *Y, int incY, float *A, int lda) {
+    cblas_sger(CblasColMajor, m, n, alpha, X, incX, Y, incY, A, lda);
+  }
+  inline static void batched_ger(Stream<cpu> *stream,
+                         int m, int n, float alpha,
+                         const float *X, int incX,
+                         const float *Y, int incY, float *A, int lda, int batch_count) {
+    for (int i = 0; i < batch_count; ++i) {
+      ger(stream, m, n, alpha, X + i * m * incX, incX, Y + i * n * incY, incY,
+          A + i * lda * n, lda);
+    }
+  }
+  inline static void dot(Stream<cpu> *stream,
+                         int n,
+                         const float* X, int incX,
+                         const float* Y, int incY,
+                         flo
