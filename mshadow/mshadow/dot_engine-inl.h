@@ -334,4 +334,146 @@ struct BLASEngine<cpu, float> {
                          int n,
                          const float* X, int incX,
                          const float* Y, int incY,
-                         flo
+                         float* ret) {
+    *ret = cblas_sdot(n, X, incX, Y, incY);
+  }
+};
+
+template<>
+struct BLASEngine<cpu, double> {
+  inline static CBLAS_TRANSPOSE GetT(bool t) {
+    return t ? CblasTrans : CblasNoTrans;
+  }
+  inline static void SetStream(Stream<cpu> *stream) {
+  }
+  inline static void gemm(Stream<cpu> *stream,
+                          bool transa, bool transb,
+                          int m, int n, int k, double alpha,
+                          const double *A, int lda, const double *B, int ldb,
+                          double beta, double *C, int ldc) {
+    cblas_dgemm(CblasColMajor, GetT(transa), GetT(transb),
+                m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+  }
+  inline static void batched_gemm(Stream<cpu> *stream,
+                                  bool transa, bool transb,
+                                  int m, int n, int k, double alpha,
+                                  const double *A, int lda, const double *B, int ldb,
+                                  double beta, double *C, int ldc, int batch_count,
+                                  double **workspace) {
+    for (int i = 0; i < batch_count; ++i) {
+      gemm(stream, transa, transb, m, n, k, alpha,
+           A + i * m * k, lda, B + i * k * n, ldb,
+           beta, C + i * m * n, ldc);
+    }
+  }
+  inline static void gemv(Stream<cpu> *stream,
+                          bool trans, int m, int n, double alpha,
+                          const double *A, int lda,
+                          const double *X, int incX,
+                          double beta, double *Y, int incY) {
+    cblas_dgemv(CblasColMajor, GetT(trans), m, n, alpha,
+                A, lda, X, incX, beta, Y, incY);
+  }
+  inline static void batched_gemv(Stream<cpu> *stream,
+                                  bool trans, int m, int n,
+                                  double alpha, const double *A, int lda,
+                                  const double *X, int incX,
+                                  double beta, double *Y, int incY, int batch_count) {
+    for (int i = 0; i < batch_count; ++i) {
+      gemv(stream, trans, m, n, alpha, A + i * m * n, lda,
+           X + i * (trans ? m : n) * incX, incX,
+           beta, Y + i * (trans ? n : m) * incY, incY);
+    }
+  }
+  inline static void ger(Stream<cpu> *stream,
+                         int m, int n, double alpha,
+                         const double *X, int incX,
+                         const double *Y, int incY, double *A, int lda) {
+    cblas_dger(CblasColMajor, m, n, alpha, X, incX, Y, incY, A, lda);
+  }
+  inline static void batched_ger(Stream<cpu> *stream,
+                         int m, int n, double alpha,
+                         const double *X, int incX,
+                         const double *Y, int incY, double *A, int lda, int batch_count) {
+    for (int i = 0; i < batch_count; ++i) {
+      ger(stream, m, n, alpha, X + i * m * incX, incX, Y + i * n * incY, incY,
+          A + i * lda * n, lda);
+    }
+  }
+  inline static void dot(Stream<cpu> *stream,
+                         int n,
+                         const double* X, int incX,
+                         const double* Y, int incY,
+                         double* ret) {
+    *ret = cblas_ddot(n, X, incX, Y, incY);
+  }
+};
+#endif  // MSHADOW_USE_CBLAS || MSHADOW_USE_MKL || MSHADOW_STAND_ALONE
+// CuBLAS redirect code
+#if MSHADOW_USE_CUDA
+// All CuBLAS goes to here, use legacy API: not threadsafe
+template<>
+struct BLASEngine<gpu, half::half_t> {
+  inline static cublasOperation_t GetT(bool t) {
+    return t ? CUBLAS_OP_T : CUBLAS_OP_N;
+  }
+  inline static void SetStream(Stream<gpu> *stream) {
+    cublasStatus_t err = cublasSetStream(Stream<gpu>::GetBlasHandle(stream),
+                    Stream<gpu>::GetStream(stream));
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas set stream fail";
+  }
+  inline static void gemm(Stream<gpu> *stream,
+                          bool transa, bool transb,
+                          int m, int n, int k, half::half_t alpha,
+                          const half::half_t *A, int lda,
+                          const half::half_t *B, int ldb, half::half_t beta,
+                          half::half_t *C, int ldc) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 7050
+#if MSHADOW_USE_PASCAL == 1
+    cublasStatus_t err = cublasHgemm(Stream<gpu>::GetBlasHandle(stream),
+                GetT(transa), GetT(transb), m, n, k, &alpha.cuhalf_,
+                &A->cuhalf_, lda, &B->cuhalf_, ldb, &beta.cuhalf_, &C->cuhalf_, ldc);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas Hgemm fail";
+#else
+    float alpha_f = float(alpha);  // NOLINT(*)
+    float beta_f = float(beta);  // NOLINT(*)
+#if CUDA_VERSION >= 8000
+    cublasStatus_t err = cublasSgemmEx(Stream<gpu>::GetBlasHandle(stream),
+                GetT(transa), GetT(transb), m, n, k, &alpha_f,
+                A, CUDA_R_16F, lda, B, CUDA_R_16F,
+                ldb, &beta_f, C, CUDA_R_16F, ldc);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas SgemmEx fail";
+#else
+    cublasStatus_t err = cublasSgemmEx(Stream<gpu>::GetBlasHandle(stream),
+                GetT(transa), GetT(transb), m, n, k, &alpha_f,
+                A, CUBLAS_DATA_HALF, lda, B, CUBLAS_DATA_HALF,
+                ldb, &beta_f, C, CUBLAS_DATA_HALF, ldc);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas SgemmEx fail";
+#endif  // CUDA_VERSION >= 8000
+#endif  // MSHADOW_USE_PASCAL == 1
+#else
+    LOG(FATAL) << "Require CUDA version >= 7.5!";
+#endif  // defined(CUDA_VERSION) && CUDA_VERSION >= 7050
+  }
+  inline static void batched_gemm(Stream<gpu> *stream,
+                                  bool transa, bool transb,
+                                  int m, int n, int k, half::half_t alpha,
+                                  const half::half_t *A, int lda, const half::half_t *B, int ldb,
+                                  half::half_t beta, half::half_t *C, int ldc, int batch_count,
+                                  half::half_t **workspace) {
+    for (int i = 0; i < batch_count; ++i) {
+      gemm(stream, transa, transb, m, n, k, alpha,
+           A + i * m * k, lda, B + i * k * n, ldb,
+           beta, C + i * m * n, ldc);
+    }
+  }
+  inline static void gemv(Stream<gpu> *stream,
+                          bool trans, int m, int n, half::half_t alpha,
+                          const half::half_t *A, int lda,
+                          const half::half_t *X, int incX, half::half_t beta,
+                          half::half_t *Y, int incY) {
+    LOG(FATAL) << "Not implmented!";
+  }
+  inline static void batched_gemv(Stream<gpu> *stream,
+                                  bool trans, int m, int n,
+                           
