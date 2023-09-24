@@ -476,4 +476,140 @@ struct BLASEngine<gpu, half::half_t> {
   }
   inline static void batched_gemv(Stream<gpu> *stream,
                                   bool trans, int m, int n,
-                           
+                                  half::half_t alpha, const half::half_t *A, int lda,
+                                  const half::half_t *X, int incX,
+                                  half::half_t beta, half::half_t *Y, int incY, int batch_count) {
+    LOG(FATAL) << "Not implmented!";
+  }
+  inline static void ger(Stream<gpu> *stream,
+                         int m, int n, half::half_t alpha,
+                         const half::half_t *X, int incX,
+                         const half::half_t *Y, int incY, half::half_t *A, int lda) {
+    LOG(FATAL) << "Not implmented!";
+  }
+  inline static void batched_ger(Stream<gpu> *stream,
+                         int m, int n, half::half_t alpha,
+                         const half::half_t *X, int incX, const half::half_t *Y, int incY,
+                         half::half_t *A, int lda, int batch_count) {
+    LOG(FATAL) << "Not implmented!";
+  }
+  inline static void dot(Stream<gpu> *stream,
+                         int n,
+                         const half::half_t* X, int incX,
+                         const half::half_t* Y, int incY,
+                         half::half_t *ret) {
+    LOG(FATAL) << "Not implmented!";
+  }
+};
+
+template<>
+struct BLASEngine<gpu, float> {
+  inline static cublasOperation_t GetT(bool t) {
+    return t ? CUBLAS_OP_T : CUBLAS_OP_N;
+  }
+  inline static void SetStream(Stream<gpu> *stream) {
+    cublasStatus_t err = cublasSetStream(Stream<gpu>::GetBlasHandle(stream),
+                    Stream<gpu>::GetStream(stream));
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: set stream fail";
+  }
+  inline static void gemm(Stream<gpu> *stream,
+                          bool transa, bool transb,
+                          int m, int n, int k, float alpha,
+                          const float *A, int lda,
+                          const float *B, int ldb, float beta,
+                          float *C, int ldc) {
+    cublasStatus_t err = cublasSgemm(Stream<gpu>::GetBlasHandle(stream),
+                GetT(transa), GetT(transb), m, n, k, &alpha,
+                A, lda, B, ldb, &beta, C, ldc);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: Sgemm fail";
+  }
+  inline static void batched_gemm(Stream<gpu> *stream,
+                                  bool transa, bool transb,
+                                  int m, int n, int k, float alpha,
+                                  const float *A, int lda, const float *B, int ldb,
+                                  float beta, float *C, int ldc, int batch_count,
+                                  float **workspace) {
+#if defined(__CUDACC__) && CUDA_VERSION >= 4010
+    // Cast DType* to DType** using workspace as a buffer
+    GetBatchedView(workspace, const_cast<float*>(A), batch_count, m * k, stream);
+    GetBatchedView(workspace + batch_count,
+                   const_cast<float*>(B), batch_count, k * n, stream);
+    GetBatchedView(workspace + 2 * batch_count, C, batch_count, m * n, stream);
+    cublasStatus_t err = cublasSgemmBatched(Stream<gpu>::GetBlasHandle(stream),
+                                            GetT(transa), GetT(transb), m, n, k, &alpha,
+                                            (const float**)workspace, lda,
+                                            (const float**)(workspace + batch_count), ldb,
+                                            &beta, workspace + 2 * batch_count, ldc, batch_count);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: SgemmBatched fail";
+#else
+    for (int i = 0; i < batch_count; ++i) {
+      gemm(stream, transa, transb, m, n, k, alpha,
+           A + i * m * k, lda, B + i * k * n, ldb,
+           beta, C + i * m * n, ldc);
+    }
+#endif  // defined(__CUDACC__) && CUDA_VERSION >= 4010
+  }
+  inline static void gemv(Stream<gpu> *stream,
+                          bool trans, int m, int n, float alpha,
+                          const float *A, int lda,
+                          const float *X, int incX, float beta,
+                          float *Y, int incY) {
+    cublasStatus_t err = cublasSgemv(Stream<gpu>::GetBlasHandle(stream),
+                GetT(trans), m, n, &alpha, A, lda, X, incX, &beta, Y, incY);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: Sgemv fail";
+  }
+  inline static void batched_gemv(Stream<gpu> *stream,
+                                  bool trans, int m, int n,
+                                  float alpha, const float *A, int lda,
+                                  const float *X, int incX,
+                                  float beta, float *Y, int incY, int batch_count) {
+    for (int i = 0; i < batch_count; ++i) {
+      gemv(stream, trans, m, n, alpha, A + i * m * n, lda,
+           X + i * (trans ? m : n) * incX, incX,
+           beta, Y + i * (trans ? n : m) * incY, incY);
+    }
+  }
+  inline static void ger(Stream<gpu> *stream,
+                         int m, int n, float alpha,
+                         const float *X, int incX,
+                         const float *Y, int incY, float *A, int lda) {
+    cublasStatus_t err = cublasSger(Stream<gpu>::GetBlasHandle(stream),
+                                    m, n, &alpha, X, incX, Y, incY, A, lda);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: Sger fail";
+  }
+  inline static void batched_ger(Stream<gpu> *stream,
+                         int m, int n, float alpha,
+                         const float *X, int incX,
+                         const float *Y, int incY, float *A, int lda, int batch_count) {
+    for (int i = 0; i < batch_count; ++i) {
+      ger(stream, m, n, alpha, X + i * m * incX, incX, Y + i * n * incY, incY,
+          A + i * lda * n, lda);
+    }
+  }
+  inline static void dot(Stream<gpu> *stream,
+                         int n,
+                         const float* X, int incX,
+                         const float* Y, int incY,
+                         float *ret) {
+    cublasSetPointerMode(Stream<gpu>::GetBlasHandle(stream),
+                         CUBLAS_POINTER_MODE_DEVICE);
+    cublasStatus_t err = cublasSdot(Stream<gpu>::GetBlasHandle(stream),
+                                    n, X, incX, Y, incY, ret);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: Dot fail";
+    cublasSetPointerMode(Stream<gpu>::GetBlasHandle(stream),
+                         CUBLAS_POINTER_MODE_HOST);
+  }
+};
+
+template<>
+struct BLASEngine<gpu, double> {
+  inline static cublasOperation_t GetT(bool t) {
+    return t ? CUBLAS_OP_T : CUBLAS_OP_N;
+  }
+  inline static void SetStream(Stream<gpu> *stream) {
+    cublasStatus_t err = cublasSetStream(Stream<gpu>::GetBlasHandle(stream),
+                    Stream<gpu>::GetStream(stream));
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: set stream fail";
+  }
+  inline static void gemm(Stream<gpu> *stream,
+                          bool transa, boo
