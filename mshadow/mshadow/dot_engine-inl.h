@@ -746,4 +746,55 @@ struct DotEngine<SV, xpu, 2, 2, 2, transpose_left, transpose_right, DType> {
   }
 };
 template<typename SV, typename xpu, bool transpose_right, typename DType>
-struct DotEngine<SV, xpu, 
+struct DotEngine<SV, xpu, 1, 1, 2, false, transpose_right, DType> {
+  inline static void Eval(Tensor<xpu, 1, DType> *p_dst,
+                          const Tensor<xpu, 1, DType> &lhs,
+                          const Tensor<xpu, 2, DType> &rhs,
+                          DType scale) {
+    Tensor<xpu, 1, DType> &dst = *p_dst;
+    // set kernel stream
+    // if there is no stream, crush
+    BLASEngine<xpu, DType>::SetStream(dst.stream_);
+    Shape<2> sright = GetShape(rhs.shape_, transpose_right);
+    CHECK(dst.size(0) == sright[1] && lhs.size(0) == sright[0])
+      << "dot-gemv: matrix shape mismatch"
+      << "dst: " << dst.shape_ << "\n"
+      << "lhs: " << lhs.shape_ << "\n"
+      << "rhs: " << sright << "\n";
+    BLASEngine<xpu, DType>::gemv
+        (dst.stream_,
+         transpose_right,
+         rhs.size(1), rhs.size(0), scale * SV::AlphaBLAS(),
+         rhs.dptr_, rhs.stride_,
+         lhs.dptr_, 1, SV::BetaBLAS(),
+         dst.dptr_, 1);
+  }
+};
+template<typename SV, typename xpu, typename DType>
+struct DotEngine<SV, xpu, 2, 1, 1, true, false, DType> {
+  inline static void Eval(Tensor<xpu, 2, DType> *p_dst,
+                          const Tensor<xpu, 1, DType> &lhs,
+                          const Tensor<xpu, 1, DType> &rhs,
+                          DType scale) {
+    Tensor<xpu, 2, DType> &dst = *p_dst;
+    // set kernel stream
+    // if there is no stream, crush
+    BLASEngine<xpu, DType>::SetStream(dst.stream_);
+    CHECK(dst.size(0) == lhs.size(0) && dst.size(1) == rhs.size(0))
+      << "dot-ger: matrix shape mismatch"
+      << "dst: " << dst.shape_ << "\n"
+      << "lhs: " << lhs.shape_ << "\n"
+      << "rhs: " << rhs.shape_;
+    if (SV::BetaBLAS() == 0.0f) {
+      BLASEngine<xpu, DType>::ger
+          (dst.stream_, rhs.size(0), lhs.size(0), scale * SV::AlphaBLAS(),
+           rhs.dptr_, 1, lhs.dptr_, 1, dst.dptr_, dst.stride_);
+    } else {
+      DotEngine<SV, xpu, 2, 2, 2, true, false,
+                DType>::Eval(dst, lhs.FlatTo2D(), rhs.FlatTo2D(), scale);
+    }
+  }
+};
+}  // namespace expr
+}  // namespace mshadow
+#endif  // MSHADOW_DOT_ENGINE_INL_H_
