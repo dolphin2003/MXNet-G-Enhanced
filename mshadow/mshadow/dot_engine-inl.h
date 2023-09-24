@@ -612,4 +612,138 @@ struct BLASEngine<gpu, double> {
     CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: set stream fail";
   }
   inline static void gemm(Stream<gpu> *stream,
-                          bool transa, boo
+                          bool transa, bool transb,
+                          int m, int n, int k, double alpha,
+                          const double *A, int lda,
+                          const double *B, int ldb,
+                          double beta, double *C, int ldc) {
+    cublasStatus_t err = cublasDgemm(Stream<gpu>::GetBlasHandle(stream),
+                GetT(transa), GetT(transb), m, n, k, &alpha,
+                A, lda, B, ldb, &beta, C, ldc);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: Dgemm fail";
+  }
+  inline static void batched_gemm(Stream<gpu> *stream,
+                                  bool transa, bool transb,
+                                  int m, int n, int k, double alpha,
+                                  const double *A, int lda, const double *B, int ldb,
+                                  double beta, double *C, int ldc, int batch_count,
+                                  double **workspace) {
+#if defined(__CUDACC__) && CUDA_VERSION >= 4010
+    // Cast DType* to DType** using workspace as a buffer
+    GetBatchedView(workspace, const_cast<double*>(A), batch_count, m * k, stream);
+    GetBatchedView(workspace + batch_count,
+                   const_cast<double*>(B), batch_count, k * n, stream);
+    GetBatchedView(workspace + 2 * batch_count, C, batch_count, m * n, stream);
+    cublasStatus_t err = cublasDgemmBatched(Stream<gpu>::GetBlasHandle(stream),
+                                            GetT(transa), GetT(transb), m, n, k, &alpha,
+                                            (const double**)workspace, lda,
+                                            (const double**)(workspace + batch_count), ldb,
+                                            &beta, workspace + 2 * batch_count, ldc, batch_count);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: DgemmBatched fail";
+#else
+    for (int i = 0; i < batch_count; ++i) {
+      gemm(stream, transa, transb, m, n, k, alpha,
+           A + i * m * k, lda, B + i * k * n, ldb,
+           beta, C + i * m * n, ldc);
+    }
+#endif  // defined(__CUDACC__) && CUDA_VERSION >= 4010
+  }
+  inline static void gemv(Stream<gpu> *stream,
+                          bool trans, int m, int n, double alpha,
+                          const double *A, int lda,
+                          const double *X, int incX,
+                          double beta, double *Y, int incY) {
+    cublasStatus_t err = cublasDgemv(Stream<gpu>::GetBlasHandle(stream),
+                GetT(trans), m, n, &alpha, A, lda, X, incX, &beta, Y, incY);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: Dgemv fail";
+  }
+  inline static void batched_gemv(Stream<gpu> *stream,
+                                  bool trans, int m, int n,
+                                  double alpha, const double *A, int lda,
+                                  const double *X, int incX,
+                                  double beta, double *Y, int incY, int batch_count) {
+    for (int i = 0; i < batch_count; ++i) {
+      gemv(stream, trans, m, n, alpha, A + i * m * n, lda,
+           X + i * (trans ? m : n) * incX, incX,
+           beta, Y + i * (trans ? n : m) * incY, incY);
+    }
+  }
+  inline static void ger(Stream<gpu> *stream,
+                         int m, int n, double alpha,
+                         const double *X, int incX,
+                         const double *Y, int incY, double *A, int lda) {
+    cublasStatus_t err = cublasDger(Stream<gpu>::GetBlasHandle(stream),
+                                    m, n, &alpha, X, incX, Y, incY, A, lda);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: Dger fail";
+  }
+  inline static void batched_ger(Stream<gpu> *stream,
+                         int m, int n, double alpha,
+                         const double *X, int incX,
+                         const double *Y, int incY, double *A, int lda, int batch_count) {
+    for (int i = 0; i < batch_count; ++i) {
+      ger(stream, m, n, alpha, X + i * m * incX, incX, Y + i * n * incY, incY,
+          A + i * lda * n, lda);
+    }
+  }
+  inline static void dot(Stream<gpu> *stream,
+                         int n,
+                         const double* X, int incX,
+                         const double* Y, int incY,
+                         double *ret) {
+    cublasSetPointerMode(Stream<gpu>::GetBlasHandle(stream),
+                         CUBLAS_POINTER_MODE_DEVICE);
+    cublasStatus_t err = cublasDdot(Stream<gpu>::GetBlasHandle(stream),
+                                    n, X, incX, Y, incY, ret);
+    CHECK_EQ(err, CUBLAS_STATUS_SUCCESS) << "Cublas: Dot fail";
+    cublasSetPointerMode(Stream<gpu>::GetBlasHandle(stream),
+                         CUBLAS_POINTER_MODE_HOST);
+  }
+};
+#endif  // MSHADOW_USE_CUDA
+// helper function to decide which shape we are in
+inline static Shape<2> GetShape(const Shape<2> &shape, bool transpose) {
+  return transpose ? Shape2(shape[1], shape[0]) : shape;
+}
+// dst = dot(lhs[.T], rhs[.T])
+template<typename SV, typename xpu,
+         bool transpose_left, bool transpose_right, typename DType>
+struct DotEngine<SV, xpu, 2, 2, 2, transpose_left, transpose_right, DType> {
+  inline static void Eval(Tensor<xpu, 2, DType> *p_dst,
+                          const Tensor<xpu, 2, DType> &lhs,
+                          const Tensor<xpu, 2, DType> &rhs,
+                          DType scale) {
+    Tensor<xpu, 2, DType> &dst = *p_dst;
+#if MSHADOW_STAND_ALONE
+    if (xpu::kDevMask == cpu::kDevMask && scale == 1.0f) {
+      if (!transpose_left && !transpose_right) {
+        dst = expr::implicit_dot(lhs, rhs); return;
+      } else if (!transpose_left && transpose_right) {
+        dst = expr::implicit_dot(lhs, rhs.T()); return;
+      } else if (transpose_left && !transpose_right) {
+        dst = expr::implicit_dot(lhs.T(), rhs); return;
+      }
+    }
+#endif
+    // set kernel stream
+    // if there is no stream, crush
+    BLASEngine<xpu, DType>::SetStream(dst.stream_);
+    Shape<2> sleft = GetShape(lhs.shape_, transpose_left);
+    Shape<2> sright = GetShape(rhs.shape_, transpose_right);
+    CHECK(dst.size(0) == sleft[0] && dst.size(1) == sright[1] && sleft[1] == sright[0])
+      << "dot-gemm: matrix shape mismatch";
+    // use column major argument to compatible with most BLAS
+    BLASEngine<xpu, DType>::gemm
+        (dst.stream_,
+         transpose_right , transpose_left,
+         transpose_right ? rhs.size(0) : rhs.size(1),
+         transpose_left  ? lhs.size(1) : lhs.size(0),
+         transpose_right ? rhs.size(1) : rhs.size(0),
+         DType(scale * SV::AlphaBLAS()),
+         rhs.dptr_, rhs.stride_,
+         lhs.dptr_, lhs.stride_,
+         DType(SV::BetaBLAS()),
+         dst.dptr_, dst.stride_);
+  }
+};
+template<typename SV, typename xpu, bool transpose_right, typename DType>
+struct DotEngine<SV, xpu, 
