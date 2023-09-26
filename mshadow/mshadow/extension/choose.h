@@ -81,4 +81,10 @@ struct ShapeCheck<dim, MatChooseRowElementExp<SrcExp, IndexExp, DType> > {
 };
 
 template<typename SrcExp, typename IndexExp, typename DType>
-struct ExpInfo
+struct ExpInfo<MatChooseRowElementExp<SrcExp, IndexExp, DType> > {
+  static const int kDim = 1;
+  static const int kDevMask = ExpInfo<SrcExp>::kDevMask & ExpInfo<IndexExp>::kDevMask;
+};
+}  // namespace expr
+}  // namespace mshadow
+#endif  // MSHADOW_EXTENSION_CHOOSE_H_
