@@ -68,4 +68,36 @@ struct Plan<MatFillRowElementExp<SrcExp, ValExp, IndexExp, DType>, DType> {
  private:
   expr::Plan<SrcExp, DType> src_;
   expr::Plan<ValExp, DType> val_;
-  expr::Plan<IndexExp,
+  expr::Plan<IndexExp, DType> index_;
+};
+
+template<typename SrcExp, typename ValExp, typename IndexExp, typename DType>
+inline Plan<MatFillRowElementExp<SrcExp, ValExp, IndexExp, DType>, DType>
+MakePlan(const MatFillRowElementExp<SrcExp, ValExp, IndexExp, DType> &exp) {
+  return Plan<MatFillRowElementExp<SrcExp, ValExp, IndexExp, DType>, DType>(exp);
+}
+
+template<int dim, typename SrcExp, typename ValExp, typename IndexExp, typename DType>
+struct ShapeCheck<dim, MatFillRowElementExp<SrcExp, ValExp, IndexExp, DType> > {
+  inline static Shape<dim>
+  Check(const MatFillRowElementExp<SrcExp, ValExp, IndexExp, DType> &t) {
+    CHECK(dim == 2)
+        << "MatFillRowElementExp only support 2 dimension output";
+    Shape<2> shape_src = ShapeCheck<2, SrcExp>::Check(t.src_);
+    Shape<1> shape_val = ShapeCheck<1, ValExp>::Check(t.val_);
+    Shape<1> shape_index = ShapeCheck<1, IndexExp>::Check(t.index_);
+    CHECK((shape_src[0] == shape_index[0]) && (shape_index[0] == shape_val[0]))
+        << "mat_fill_row_element index length, val length and number of rows in matrix";
+    return shape_src;
+  }
+};
+
+template<typename SrcExp, typename ValExp, typename IndexExp, typename DType>
+struct ExpInfo<MatFillRowElementExp<SrcExp, ValExp, IndexExp, DType> > {
+  static const int kDim = 2;
+  static const int kDevMask =
+          ExpInfo<SrcExp>::kDevMask & ExpInfo<ValExp>::kDevMask & ExpInfo<IndexExp>::kDevMask;
+};
+}  // namespace expr
+}  // namespace mshadow
+#endif  // MSHADOW_EXTENSION_FILL_H_
