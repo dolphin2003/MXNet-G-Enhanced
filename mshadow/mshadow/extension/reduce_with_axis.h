@@ -117,3 +117,21 @@ struct Plan<ReduceWithAxisExp<Reducer, SrcExp, DType, dimsrc, mask, dimdst>, DTy
           idx = k;
         }
       }
+      return static_cast<DType>(static_cast<int>(idx));
+    } else {
+      DType res; Reducer::SetInitValue(res);
+      for (index_t k = 0; k < size_; ++k) {
+        index_t z = (x*size_+k)*trailing_+y;
+        Reducer::Reduce(res, src_.Eval(z/last_, z%last_));
+      }
+      return res;
+    }
+  }
+
+ private:
+  Plan<SrcExp, DType> src_;
+  const index_t last_dst_dim_, trailing_, size_, last_;
+};
+}  // namespace expr
+}  // namespace mshadow
+#endif  // MSHADOW_EXTENSION_REDUCE_WITH_AXIS_H_
