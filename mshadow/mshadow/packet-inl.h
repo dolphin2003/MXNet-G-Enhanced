@@ -289,4 +289,121 @@ inline PacketPlan<BinaryMapExp<OP, TA, TB, DType, etype>, DType, Arch>
 MakePacketPlan(const BinaryMapExp<OP, TA, TB, DType, etype> &e);
 
 template<PacketArch Arch, typename DType>
-inline PacketPlan<ScalarExp<DType>, DType, Arch> MakePacke
+inline PacketPlan<ScalarExp<DType>, DType, Arch> MakePacketPlan(const ScalarExp<DType> &e) {
+  return PacketPlan<ScalarExp<DType>, DType, Arch>(e.scalar_);
+}
+template<PacketArch Arch, typename T, typename DType>
+inline PacketPlan<T, DType, Arch> MakePacketPlan(const RValueExp<T, DType> &e) {
+  return PacketPlan<T, DType, Arch>(e.self());
+}
+template<PacketArch Arch, typename T, int dim, typename DType>
+inline PacketPlan<T, DType, Arch>
+MakePacketPlan(const MakeTensorExp<T, cpu, dim, DType> &e) {
+  return PacketPlan<T, DType, Arch>(e.real_self());
+}
+template<PacketArch Arch, typename OP, typename TA, typename DType, int etype>
+inline PacketPlan<UnaryMapExp<OP, TA, DType, etype>, DType, Arch>
+MakePacketPlan(const UnaryMapExp<OP, TA, DType, etype> &e) {
+  return PacketPlan<UnaryMapExp<OP, TA, DType, etype>, DType, Arch>(MakePacketPlan<Arch>(e.src_));
+}
+template<PacketArch Arch, typename OP, typename TA, typename TB, typename DType, int etype>
+inline PacketPlan<BinaryMapExp<OP, TA, TB, DType, etype>, DType, Arch>
+MakePacketPlan(const BinaryMapExp<OP, TA, TB, DType, etype> &e) {
+  return PacketPlan<BinaryMapExp<OP, TA, TB, DType, etype>,
+                    DType, Arch>(MakePacketPlan<Arch>(e.lhs_), MakePacketPlan<Arch>(e.rhs_));
+}
+
+/*!
+ * \brief static check packet enable
+ *
+ * \tparam Device the type of Device
+ * \tparam dim dimension of the tensor
+ * \tparam E expression
+ */
+template<typename E, PacketArch Arch>
+struct PacketCheck{
+  static const bool kPass = false;
+};
+template<PacketArch Arch>
+struct PacketCheck<float, Arch> {
+  static const bool kPass = true;
+};
+template<PacketArch Arch>
+struct PacketCheck<double, Arch> {
+  static const bool kPass = true;
+};
+template<typename DType, PacketArch Arch>
+struct PacketCheck<ScalarExp<DType>, Arch> {
+  static const bool kPass = PacketCheck<DType, Arch>::kPass;
+};
+template<int dim, typename DType, PacketArch Arch>
+struct PacketCheck<Tensor<cpu, dim, DType>, Arch> {
+  static const bool kPass = PacketCheck<DType, Arch>::kPass;
+};
+template<typename OP, typename TA, typename DType, int etype, PacketArch Arch>
+struct PacketCheck<UnaryMapExp<OP, TA, DType, etype>, Arch> {
+  static const bool kPass = PacketCheck<TA, Arch>::kPass &&
+      packet::PacketOp<OP, DType, Arch>::kEnabled;
+};
+template<typename OP, typename TA, typename TB, typename DType, int etype, PacketArch Arch>
+struct PacketCheck< BinaryMapExp<OP, TA, TB, DType, etype>, Arch> {
+  static const bool kPass = packet::PacketOp<OP, DType, Arch>::kEnabled &&
+      PacketCheck<TA, Arch>::kPass && PacketCheck<TB, Arch>::kPass;
+};
+//----------------------------------------------------
+// Check if data is aligned and allow packet operation
+//----------------------------------------------------
+template<int dim, typename E, PacketArch Arch>
+struct PacketAlignCheck {
+  inline static bool Check(const E &exp) {
+    return false;
+  }
+};
+template<int dim, typename DType, PacketArch Arch>
+struct PacketAlignCheck<dim, ScalarExp<DType>, Arch> {
+  inline static bool Check(const ScalarExp<DType> &exp) {
+    return true;
+  }
+};
+template<int dim, typename DType, PacketArch Arch>
+struct PacketAlignCheck<dim, Tensor<cpu, dim, DType>, Arch> {
+  inline static bool Check(const Tensor<cpu, dim, DType> &t) {
+    return packet::CheckAlign<Arch>(t.dptr_) &&
+        packet::CheckAlign<Arch>(t.stride_ * sizeof(DType));
+  }
+};
+template<int dim, typename OP, typename TA, typename DType, int etype, PacketArch Arch>
+struct PacketAlignCheck<dim, UnaryMapExp<OP, TA, DType, etype>, Arch> {
+  inline static bool Check(const UnaryMapExp<OP, TA, DType, etype> &t) {
+    return PacketAlignCheck<dim, TA, Arch>::Check(t.src_);
+  }
+};
+template<int dim, typename OP, typename TA, typename TB,
+         typename DType, int etype, PacketArch Arch>
+struct PacketAlignCheck<dim, BinaryMapExp<OP, TA, TB, DType, etype>, Arch> {
+  inline static bool Check(const BinaryMapExp<OP, TA, TB, DType, etype> &t) {
+    return PacketAlignCheck<dim, TA, Arch>::Check(t.lhs_) &&
+        PacketAlignCheck<dim, TB, Arch>::Check(t.rhs_);
+  }
+};
+
+/*!
+ * \brief use PacketPlan to compute result
+ */
+template<typename SV, typename E, int dim, typename DType, PacketArch Arch>
+inline void MapPacketPlan(Tensor<cpu, dim, DType> _dst,
+                          const expr::PacketPlan<E, DType, Arch>& plan) {
+  Tensor<cpu, 2, DType> dst = _dst.FlatTo2D();
+  const index_t xlen = packet::LowerAlign<DType, Arch>(dst.size(1));
+  for (index_t y = 0; y < dst.size(0); ++y) {
+    for (index_t x = 0; x < xlen; x += packet::Packet<DType, Arch>::kSize) {
+      packet::Saver<SV, DType, Arch>::Save(&dst[y][x], plan.EvalPacket(y, x));
+    }
+    for (index_t x = xlen; x < dst.size(1); ++x) {
+      SV::Save(dst[y][x], plan.Eval(y, x));
+    }
+  }
+}
+}  // namespace expr
+}  // namespace mshadow
+#endif  // MSHADOW_PACKET_INL_H_
