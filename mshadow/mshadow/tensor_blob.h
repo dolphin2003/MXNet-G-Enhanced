@@ -378,3 +378,281 @@ struct TShape {
  * \param os the output stream
  * \param shape the shape
  * \return the ostream
+ */
+inline std::ostream &operator<<(std::ostream &os, const TShape &shape) {
+  os << '(';
+  for (index_t i = 0; i < shape.ndim(); ++i) {
+    if (i != 0) os << ',';
+    os << shape[i];
+  }
+  // python style tuple
+  if (shape.ndim() == 1) os << ',';
+  os << ')';
+  return os;
+}
+
+/*!
+ * \brief read shape from the istream
+ * \param is the input stream
+ * \param shape the shape
+ * \return the istream
+ */
+inline std::istream &operator>>(std::istream &is, TShape &shape) {
+  // get (
+  while (true) {
+    char ch = is.peek();
+    if (isdigit(ch)) {
+      index_t idx;
+      if (is >> idx) {
+        shape.CopyFrom(&idx, &idx + 1);
+      }
+      return is;
+    }
+    is.get();
+    if (ch == '(') break;
+    if (!isspace(ch)) {
+      is.setstate(std::ios::failbit);
+      return is;
+    }
+  }
+  index_t idx;
+  std::vector<index_t> tmp;
+  while (is >> idx) {
+    tmp.push_back(idx);
+    char ch;
+    do {
+      ch = is.get();
+    } while (isspace(ch));
+    if (ch == 'L') {
+      ch = is.get();
+    }
+    if (ch == ',') {
+      while (true) {
+        ch = is.peek();
+        if (isspace(ch)) {
+          is.get(); continue;
+        }
+        if (ch == ')') {
+          is.get(); break;
+        }
+        break;
+      }
+      if (ch == ')') break;
+    } else if (ch == ')') {
+      break;
+    } else {
+      is.setstate(std::ios::failbit);
+      return is;
+    }
+  }
+  shape.CopyFrom(tmp.begin(), tmp.end());
+  return is;
+}
+
+
+/*!
+ * \brief tensor blob class that can be used to hold tensor of any dimension,
+ *  any device and any data type,
+ *  This is a weak type that can be used to transfer data through interface
+ *  TBlob itself do not involve any arithmentic operations,
+ *  but it can be converted to tensor of fixed dimension for further operations
+ *
+ *  Like tensor, this data structure is like a pointer class and do not
+ *  implicit allocated, de-allocate space.
+ *  This data structure can be helpful to hold tensors of different dimensions
+ *  and wait for further processing
+ */
+class TBlob {
+ public:
+  /*! \brief pointer to the data */
+  void *dptr_;
+  /*! \brief shape of the tensor */
+  TShape shape_;
+  /*!
+   * \brief storing the stride information in x dimension
+   */
+  index_t stride_;
+  /*! \brief device mask of the corresponding device */
+  int dev_mask_;
+  /*! \brief type flag of the tensor blob */
+  int type_flag_;
+  /*! \brief default constructor, default copy assign will work */
+  TBlob(void)
+      : dptr_(NULL), dev_mask_(cpu::kDevMask),
+        type_flag_(DataType<default_real_t>::kFlag) {}
+  /*!
+   * \brief constructor that construct TBlob from contiguous memory
+   * \param dptr the pointer to the memory
+   * \param shape the shape of the data
+   * \param dev_mask the device mask, can be cpu::kDevMask or gpu::kDevMask
+   */
+  template<typename DType>
+  TBlob(DType *dptr,
+        const TShape &shape,
+        int dev_mask)
+      : dptr_(dptr), shape_(shape),
+        stride_(shape[shape.ndim() - 1]),
+        dev_mask_(dev_mask),
+        type_flag_(DataType<DType>::kFlag) {}
+  /*!
+   * \brief constructor that construct TBlob from contiguous memory
+   * \param dptr the pointer to the memory
+   * \param shape the shape of the data
+   * \param dev_mask the device mask, can be cpu::kDevMask or gpu::kDevMask
+   * \param type_flag the type flag. Can be one of enum mshadow::dtype
+   */
+  TBlob(void *dptr,
+        const TShape &shape,
+        int dev_mask,
+        int type_flag)
+      : dptr_(dptr), shape_(shape),
+        stride_(shape[shape.ndim() - 1]),
+        dev_mask_(dev_mask),
+        type_flag_(type_flag) {}
+  /*!
+   * \brief constructor from tensor
+   * \param src source tensor
+   * \tparam Device which device the tensor is on
+   * \tparam dim tensor dimension
+   * \tparam DType the type of elements in the tensor
+   */
+  template<typename Device, int dim, typename DType>
+  TBlob(const Tensor<Device, dim, DType> &src) {  // NOLINT(*)
+    *this = src;
+  }
+  /*!
+   * \brief assignment from tensor
+   * \param src source tensor
+   * \tparam Device which device the tensor is on
+   * \tparam dim tensor dimension
+   * \tparam DType the type of elements in the tensor
+   * \return reference of self
+   */
+  template<typename Device, int dim, typename DType>
+  inline TBlob
+  &operator=(const Tensor<Device, dim, DType> &src) {
+    dptr_ = src.dptr_;
+    shape_ = src.shape_;
+    stride_ = src.stride_;
+    dev_mask_ = Device::kDevMask;
+    type_flag_ = DataType<DType>::kFlag;
+    return *this;
+  }
+  /*!
+   * \return whether the tensor's memory is continuous
+   */
+  inline bool CheckContiguous(void) const {
+    return shape_[shape_.ndim() - 1] == stride_;
+  }
+  /*!
+   * \brief flatten the tensor to 2 dimension, collapse the higher dimensions together
+   * \param stream the possible stream target tensor should reside on
+   * \tparam Device which device the tensor is on
+   * \tparam DType the type of elements in the tensor
+   * \return tensor after flatten
+   */
+  template<typename Device, typename DType>
+  inline Tensor<Device, 2, DType> FlatTo2D(Stream<Device> *stream = NULL) const {
+    CHECK(Device::kDevMask == dev_mask_)
+      << "TBlob.get: device type do not match specified type";
+    CHECK(DataType<DType>::kFlag == type_flag_)
+      << "TBlob.get_with_shape: data type do not match specified type."
+      << "Expected: " << type_flag_ << " v.s. given " << DataType<DType>::kFlag;
+    return Tensor<Device, 2, DType>(static_cast<DType*>(dptr_),
+                                    shape_.FlatTo2D(), stride_, stream);
+  }
+  /*! \brief return number of dimension of the tensor inside */
+  inline int ndim(void) const {
+    return shape_.ndim();
+  }
+  /*!
+   * \brief return size of i-th dimension, start counting from highest dimension
+   * \param idx the dimension count from the highest dimensin
+   * \return the size
+   */
+  inline index_t size(index_t idx) const {
+    return shape_[idx];
+  }
+  /*! \brief total number of elements in the tensor */
+  inline index_t Size(void) const {
+    return shape_.Size();
+  }
+  /*!
+   * \brief fetch the tensor, with respect to specific dimension
+   * if dim do not match the stored dimension, an error will be issued
+   * \return the tensor requested
+   * \param stream the possible stream target tensor should reside on
+   * \tparam Device which device the tensor is on
+   * \tparam dim dimension of the tensor
+   * \tparam DType the type of elements in the tensor
+   */
+  template<typename Device, int dim, typename DType>
+  inline Tensor<Device, dim, DType> get(Stream<Device> *stream = NULL) const {
+    CHECK(Device::kDevMask == dev_mask_)
+      << "TBlob.get: device type do not match specified type";
+    CHECK(DataType<DType>::kFlag == type_flag_)
+      << "TBlob.get_with_shape: data type do not match specified type."
+      << "Expected: " << type_flag_ << " v.s. given " << DataType<DType>::kFlag;
+    return Tensor<Device, dim, DType>(static_cast<DType*>(dptr_),
+                                       shape_.get<dim>(),
+                                       stride_, stream);
+  }
+  /*!
+   * \brief fetch a tensor in given shape
+   *  If size do not match the stored size, an error will be issued
+   * \return the tensor requested
+   * \param shape the shape required
+   * \param stream the possible stream target tensor should reside on
+   * \tparam Device which device the tensor is on
+   * \tparam dim dimension of the tensor
+   * \tparam DType the type of elements in the tensor
+   */
+  template<typename Device, int dim, typename DType>
+  inline Tensor<Device, dim, DType> get_with_shape(const Shape<dim> &shape,
+                                                   Stream<Device> *stream = NULL) const {
+    CHECK(Device::kDevMask == dev_mask_)
+      << "TBlob.get: device type do not match specified type";
+    CHECK(DataType<DType>::kFlag == type_flag_)
+      << "TBlob.get_with_shape: data type do not match specified type."
+      << "Expected: " << type_flag_ << " v.s. given " << DataType<DType>::kFlag;
+    CHECK_EQ(this->CheckContiguous(), true) << "TBlob.get_reshape: must be contiguous";
+    CHECK_EQ(this->shape_.Size(), shape.Size())
+      << "TBlob.get_with_shape: new and old shape do not match total elements";
+    return Tensor<Device, dim, DType>(static_cast<DType*>(dptr_),
+                                      shape,
+                                      shape[dim - 1],
+                                      stream);
+  }
+  /*!
+   * \brief flatten the tensor to 3 dimension,
+   *  collapse the dimension before and after specified axis.
+   * \param axis The axis specified.
+   * \param stream the possible stream target tensor should reside on
+   * \tparam Device which device the tensor is on
+   * \tparam DType the type of elements in the tensor
+   * \return tensor after flatten
+   */
+  template<typename Device, typename DType>
+  inline Tensor<Device, 3, DType> FlatTo3D(int axis, Stream<Device> *stream = NULL) const {
+    return this->get_with_shape<Device, 3, DType>(
+        this->shape_.FlatTo3D(axis), stream);
+  }
+  /*!
+   * \brief flatten the tensor to 3 dimension,
+   *  collapse the dimension: [0, axis_begin), [axis_begin, axis_end], (axis_end, ndim).
+   * \param axis_begin The beginning axis specified.
+   * \param axis_end The ending axis specified.
+   * \param stream the possible stream target tensor should reside on
+   * \tparam Device which device the tensor is on
+   * \tparam DType the type of elements in the tensor
+   * \return tensor after flatten
+   */
+  template<typename Device, typename DType>
+  inline Tensor<Device, 3, DType> FlatTo3D(int axis_begin, int axis_end,
+    Stream<Device> *stream = NULL) const {
+    return this->get_with_shape<Device, 3, DType>(
+        this->shape_.FlatTo3D(axis_begin, axis_end), stream);
+  }
+};
+}  // namespace mshadow
+#endif  // MSHADOW_TENSOR_BLOB_H_
