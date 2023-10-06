@@ -192,4 +192,198 @@ inline void MapExp(TRValue<R, cpu, dim, DType> *dst,
   CHECK(eshape[0] == 0 || eshape == dshape)
       << "Assignment: Shape of Tensors are not consistent with target, "
       << "eshape: " << eshape << " dshape:" << dshape;
-  MapExpCPUEngine<expr::PacketCheck<E, MSHADOW_DEFAULT_PACKET>::kPass
+  MapExpCPUEngine<expr::PacketCheck<E, MSHADOW_DEFAULT_PACKET>::kPass,
+                  Saver, R, dim, DType, E, etype>
+  ::Map(dst->ptrself(), exp);
+}
+
+template<typename Saver, typename Reducer,
+         typename R, typename DType, typename E, int etype>
+inline void MapReduceKeepLowest(TRValue<R, cpu, 1, DType> *dst,
+                                const expr::Exp<E, DType, etype> &exp,
+                                DType scale) {
+  expr::TypeCheckPass<expr::TypeCheck<cpu, 1, DType, E>::kRedPass>
+      ::Error_TypeCheck_Not_Pass_For_Reduce_Exp();
+  Shape<2> eshape = expr::ShapeCheck<expr::ExpInfo<E>::kDim, E>
+      ::Check(exp.self()).FlatTo2D();
+  Shape<1> dshape = expr::ShapeCheck<1, R>::Check(dst->self());
+  CHECK_EQ(eshape[1], dshape[0]) << "MapReduceKeepLowest::reduction dimension do not match";
+  CHECK_NE(eshape[0], 0) << "can not reduce over empty tensor";
+  // execution
+  expr::Plan<R, DType> dplan = MakePlan(dst->self());
+  expr::Plan<E, DType> splan = MakePlan(exp.self());
+  for (index_t x = 0; x < eshape[1]; ++x) {
+    DType res = splan.Eval(0, x);
+    for (index_t y = 1; y < eshape[0]; ++y) {
+      Reducer::Reduce(res, splan.Eval(y, x));
+    }
+    Saver::template Save<DType>(dplan.REval(0, x), res * scale);
+  }
+}
+
+template<typename Saver, typename Reducer, int dimkeep,
+         typename R, typename DType, typename E, int etype>
+inline void MapReduceKeepHighDim(TRValue<R, cpu, 1, DType> *dst,
+                                 const expr::Exp<E, DType, etype> &exp,
+                                 DType scale) {
+  expr::TypeCheckPass<expr::TypeCheck<cpu, dimkeep, DType, E>::kRedPass>
+      ::Error_TypeCheck_Not_Pass_For_Reduce_Exp();
+  typedef Shape<expr::ExpInfo<E>::kDim> EShape;
+  EShape eshape = expr::ShapeCheck<expr::ExpInfo<E>::kDim, E>
+      ::Check(exp.self());
+  Shape<1> dshape = expr::ShapeCheck<1, R>::Check(dst->self());
+  CHECK_EQ(eshape[dimkeep], dshape[0])
+    << "MapReduceKeepHighDim::reduction dimension do not match";
+  // use equvalent form
+  Shape<4> pshape = Shape4(eshape.ProdShape(0, dimkeep),
+                           eshape[dimkeep],
+                           eshape.ProdShape(dimkeep + 1, EShape::kSubdim),
+                           eshape[EShape::kSubdim]);
+  // execution
+  expr::Plan<R, DType> dplan = MakePlan(dst->self());
+  expr::Plan<E, DType> splan = MakePlan(exp.self());
+  for (index_t c = 0; c < pshape[1]; ++c) {
+    DType res; Reducer::SetInitValue(res);
+    for (index_t n = 0; n < pshape[0]; ++n) {
+      DType tres; Reducer::SetInitValue(tres);
+      for (index_t y = 0; y < pshape[2]; ++y) {
+        for (index_t x = 0; x < pshape[3]; ++x) {
+          Reducer::Reduce(tres,
+                          splan.Eval((n * pshape[1] + c) * pshape[2] + y, x));
+        }
+      }
+      Reducer::Reduce(res, tres);
+    }
+    Saver::template Save<DType>(dplan.REval(0, c), DType(res * scale));
+  }
+}
+
+template<typename DType>
+inline void Softmax(Tensor<cpu, 1, DType> dst,
+                    const Tensor<cpu, 1, DType> &energy) {
+  DType mmax = energy[0];
+  for (index_t x = 1; x < dst.size(0); ++x) {
+    if (mmax < energy[x]) mmax = energy[x];
+  }
+  DType sum = DType(0.0f);
+  for (index_t x = 0; x < dst.size(0); ++x) {
+    dst[x] = std::exp(energy[x] - mmax);
+    sum += dst[x];
+  }
+  for (index_t x = 0; x < dst.size(0); ++x) {
+    dst[x] /= sum;
+  }
+}
+
+template<typename DType>
+inline void SoftmaxGrad(Tensor<cpu, 2, DType> dst,
+                        const Tensor<cpu, 2, DType> &src,
+                        const Tensor<cpu, 1, DType> &label) {
+  for (index_t y = 0; y < dst.size(0); ++y) {
+    const index_t k = static_cast<int>(label[y]);
+    for (index_t x = 0; x < dst.size(1); ++x) {
+      if (x == k) {
+        dst[y][k] = src[y][k] - 1.0f;
+      } else {
+        dst[y][x] = src[y][x];
+      }
+    }
+  }
+}
+
+template<typename DType>
+inline void SoftmaxGrad(Tensor<cpu, 2, DType> dst,
+                        const Tensor<cpu, 2, DType> &src,
+                        const Tensor<cpu, 1, DType> &label,
+                        const DType &ignore_label) {
+  for (index_t y = 0; y < dst.size(0); ++y) {
+    const index_t k = static_cast<int>(label[y]);
+    for (index_t x = 0; x < dst.size(1); ++x) {
+      if (static_cast<int>(ignore_label) == k) {
+        dst[y][x] = 0.0f;
+      } else {
+        if (x == k) {
+          dst[y][k] = src[y][k] - 1.0f;
+        } else {
+          dst[y][x] = src[y][x];
+        }
+      }
+    }
+  }
+}
+
+template<typename DType>
+inline void SoftmaxGrad(Tensor<cpu, 3, DType> dst,
+                        const Tensor<cpu, 3, DType> &src,
+                        const Tensor<cpu, 2, DType> &label) {
+  for (index_t n = 0; n < dst.size(2); ++n) {
+    for (index_t y = 0; y < dst.size(0); ++y) {
+      const index_t k = static_cast<int>(label[y][n]);
+      for (index_t x = 0; x < dst.size(1); ++x) {
+        if (x == k) {
+          dst[y][k][n] = src[y][k][n] - 1.0f;
+        } else {
+          dst[y][x][n] = src[y][x][n];
+        }
+      }
+    }
+  }
+}
+
+template<typename DType>
+inline void SoftmaxGrad(Tensor<cpu, 3, DType> dst,
+                        const Tensor<cpu, 3, DType> &src,
+                        const Tensor<cpu, 2, DType> &label,
+                        const DType &ignore_label) {
+  for (index_t n = 0; n < dst.size(2); ++n) {
+    for (index_t y = 0; y < dst.size(0); ++y) {
+      const index_t k = static_cast<int>(label[y][n]);
+      if (k == static_cast<int>(ignore_label)) {
+        for (index_t x = 0; x < dst.size(1); ++x) {
+          dst[y][x][n] = DType(0.0f);
+        }
+      } else {
+        for (index_t x = 0; x < dst.size(1); ++x) {
+          if (x == k) {
+            dst[y][k][n] = src[y][k][n] - 1.0f;
+          } else {
+            dst[y][x][n] = src[y][x][n];
+          }
+        }
+      }
+    }
+  }
+}
+
+template<typename DType>
+inline void Softmax(Tensor<cpu, 2, DType> dst,
+                    const Tensor<cpu, 2, DType> &energy) {
+  CHECK_EQ(dst.shape_, energy.shape_) << "Softmax: shape mismatch";
+  for (index_t y = 0; y < dst.size(0); ++y) {
+    Softmax(dst[y], energy[y]);
+  }
+}
+
+template<typename DType>
+inline void Softmax(Tensor<cpu, 3, DType> dst,
+                    const Tensor<cpu, 3, DType> &energy) {
+  CHECK_EQ(dst.shape_, energy.shape_) << "Softmax: shape mismatch";
+  for (index_t y = 0; y < dst.size(0); ++y) {
+    for (index_t n = 0; n < dst.size(2); ++n) {
+      DType mmax = energy[y][0][n];
+      for (index_t x = 1; x < dst.size(1); ++x) {
+        if (mmax < energy[y][x][n]) mmax = energy[y][x][n];
+      }
+      DType sum = DType(0.0f);
+      for (index_t x = 0; x < dst.size(1); ++x) {
+        dst[y][x][n] = std::exp(energy[y][x][n] - mmax);
+        sum += dst[y][x][n];
+      }
+      for (index_t x = 0; x < dst.size(1); ++x) {
+        dst[y][x][n] /= sum;
+      }
+    }
+  }
+}
+
+template<typename 
