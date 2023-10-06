@@ -386,4 +386,112 @@ inline void Softmax(Tensor<cpu, 3, DType> dst,
   }
 }
 
-template<typename 
+template<typename IndexType, typename DType>
+inline void AddTakeGrad(Tensor<cpu, 2, DType> dst,
+                        const Tensor<cpu, 1, IndexType>& index,
+                        const Tensor<cpu, 2, DType> &src) {
+  for (index_t y = 0; y < index.size(0); ++y) {
+    dst[index[y]] += src[y];
+  }
+}
+
+template<typename IndexType, typename DType>
+inline void AddTakeGradLargeBatch(Tensor<cpu, 2, DType> dst,
+                                  const Tensor<cpu, 1, IndexType>& sorted,
+                                  const Tensor<cpu, 1, IndexType>& index,
+                                  const Tensor<cpu, 2, DType> &src) {
+  for (index_t y = 0; y < sorted.size(0); ++y) {
+    dst[sorted[y]] += src[index[y]];
+  }
+}
+
+template<typename KDType, typename VDType>
+inline void SortByKey(Tensor<cpu, 1, KDType> keys, Tensor<cpu, 1, VDType> values,
+                      bool is_ascend) {
+  CHECK_EQ(keys.CheckContiguous(), true);
+  CHECK_EQ(values.CheckContiguous(), true);
+  CHECK_EQ(keys.size(0), values.size(0))
+    << "The sizes of key/value are not equal! keys_size: " << keys.size(0)
+    << "values_size: " << values.size(0);
+  std::vector<std::pair<KDType, VDType> > V;
+  for (index_t i = 0; i < values.size(0); ++i) {
+    std::pair<KDType, VDType> P = std::make_pair(keys[i], values[i]);
+    V.push_back(P);
+  }
+  if (is_ascend) {
+    std::stable_sort(V.begin(), V.end());
+  } else {
+    std::stable_sort(V.begin(), V.end(), std::greater<std::pair<KDType, VDType> >());
+  }
+  for (index_t i = 0; i < values.size(0); i++) {
+    keys[i] = V[i].first;
+    values[i] = V[i].second;
+  }
+}
+
+template<typename Device, typename VDType, typename SDType>
+inline void VectorizedSort(Tensor<Device, 1, VDType> values, Tensor<Device, 1, SDType> segments) {
+  // We can sort each segments using two stable sorts
+  SortByKey(values, segments, true);
+  SortByKey(segments, values, true);
+}
+
+// blas related
+template<typename Device, typename DType>
+inline void VectorDot(Tensor<Device, 1, DType> dst,
+                      const Tensor<Device, 1, DType> &lhs,
+                      const Tensor<Device, 1, DType> &rhs) {
+  CHECK_EQ(lhs.size(0), rhs.size(0))
+      << "VectorDot: Shape mismatch";
+  CHECK_EQ(dst.size(0), 1)
+      << "VectorDot: expect dst to be scalar";
+  expr::BLASEngine<Device, DType>::SetStream(lhs.stream_);
+  mshadow::expr::BLASEngine<Device, DType>::dot(
+      lhs.stream_, lhs.size(0), lhs.dptr_, 1, rhs.dptr_, 1, dst.dptr_);
+}
+
+template<bool transpose_left, bool transpose_right, typename Device, typename DType>
+inline void BatchGEMM(Tensor<Device, 3, DType> dst,
+                      const Tensor<Device, 3, DType> &lhs,
+                      const Tensor<Device, 3, DType> &rhs,
+                      DType alpha,
+                      DType beta,
+                      Tensor<Device, 1, DType*> workspace) {
+  int batch_size = dst.shape_[0];
+  expr::BLASEngine<Device, DType>::SetStream(dst.stream_);
+  Shape<3> sleft = transpose_left ? Shape3(lhs.shape_[0], lhs.shape_[2], lhs.shape_[1])
+    : lhs.shape_;
+  Shape<3> sright = transpose_right ? Shape3(rhs.shape_[0], rhs.shape_[2], rhs.shape_[1])
+    : rhs.shape_;
+  CHECK_EQ(dst.CheckContiguous(), true);
+  CHECK_EQ(lhs.CheckContiguous(), true);
+  CHECK_EQ(rhs.CheckContiguous(), true);
+  CHECK(sleft[0] == batch_size && sright[0] == batch_size)
+    << "BatchGEMM: batchsize must be equal."
+    << "dst: " << dst.shape_ << "\n"
+    << "lhs: " << sleft << "\n"
+    << "rhs: " << sright << "\n";
+  CHECK(dst.size(1) == sleft[1] && dst.size(2) == sright[2] && sleft[2] == sright[1])
+    << "BatchGEMM: matrix shape mismatch"
+    << "dst: " << dst.shape_ << "\n"
+    << "lhs: " << sleft << "\n"
+    << "rhs: " << sright << "\n";
+  CHECK(workspace.size(0) >= 3 * batch_size)
+    << "Workspace Size must be bigger than " << 3 * batch_size;
+  CHECK_EQ(workspace.CheckContiguous(), true);
+  // use column major argument to compatible with most BLAS
+  expr::BLASEngine<Device, DType>::batched_gemm
+    (dst.stream_,
+    transpose_right, transpose_left,
+    transpose_right ? rhs.size(1) : rhs.size(2),
+    transpose_left ? lhs.size(2) : lhs.size(1),
+    transpose_right ? rhs.size(2) : rhs.size(1),
+    alpha,
+    rhs.dptr_, rhs.stride_,
+    lhs.dptr_, lhs.stride_,
+    beta,
+    dst.dptr_, dst.stride_, batch_size,
+    workspace.dptr_);
+}
+}  // namespace mshadow
+#endif  // MSHADOW_TENSOR_CPU_INL_H_
