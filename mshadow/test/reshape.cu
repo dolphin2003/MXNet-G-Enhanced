@@ -1,3 +1,4 @@
+
 #include "mshadow/tensor.h"
 #include "old/tensor.h"
 #include "assert.h"
@@ -41,17 +42,22 @@ void RunTask() {
   }
   mshadow::Copy(mct, srcm);
   Xmshadow::Copy(xct, srcx);
-  mshadow::TensorContainer<xpua, 2, float> pool_ct(mshadow::Shape2((X-K)/2+1, (X-K)/2+1));
-  Xmshadow::TensorContainer<xpub, 2> pool_xct(Xmshadow::Shape2((X-K)/2+1, (X-K)/2+1));
 
-  pool_ct = mshadow::expr::pool<mshadow::red::maximum>(mct, K, K, K);
-  pool_xct = Xmshadow::expr::pool<Xmshadow::red::maximum>(xct, K, K);
-
-  mshadow::TensorContainer<mshadow::cpu, 2, float> cpool_ct(mshadow::Shape2((X-K)/2+1, (X-K)/2+1));
-  Xmshadow::TensorContainer<Xmshadow::cpu, 2> cpool_xct(Xmshadow::Shape2((X-K)/2+1, (X-K)/2+1));
-  mshadow::Copy(cpool_ct, pool_ct);
-  Xmshadow::Copy(cpool_xct, pool_xct);
-  if (Check(cpool_ct, cpool_xct)) {
+  mshadow::TensorContainer<xpua, 4, float> mct4d(mshadow::Shape4(1, 1, X / K, X * K));
+  Xmshadow::TensorContainer<xpub, 4> xct4d(Xmshadow::Shape4(X / K, X * K, 1, 1));
+  
+  mct4d = mshadow::expr::reshape(mct, mct4d.shape_);
+  xct4d = Xmshadow::expr::reshape(xct, xct4d.shape);
+  
+  mct = mshadow::expr::reshape(mct4d, mct.shape_);
+  xct = Xmshadow::expr::reshape(xct4d, xct.shape);
+  
+  mshadow::TensorContainer<mshadow::cpu, 2, float> m_ct(mshadow::Shape2(X, X));
+  Xmshadow::TensorContainer<Xmshadow::cpu, 2> x_ct(Xmshadow::Shape2(X, X));
+  
+  mshadow::Copy(m_ct, mct);
+  Xmshadow::Copy(x_ct, xct);
+  if (Check(m_ct, x_ct)) {
     printf("Pass\n");
   }
 }
