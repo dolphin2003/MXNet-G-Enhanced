@@ -171,4 +171,113 @@ class CaffeLoss : public Operator {
   CaffeLossParam param_;
   ::caffe::Layer<Dtype> *caffeOp_;
   Dtype grad_scale_;
-  std::vector< ::ca
+  std::vector< ::caffe::Blob<Dtype> *> bot_, top_;
+  std::vector<bool> flags_;
+  bool setup_;
+};  // class CaffeLoss
+
+// Decalre Factory function, used for dispatch specialization
+template<typename xpu>
+Operator* CreateOp(CaffeLossParam param, int);
+
+#if DMLC_USE_CXX11
+class CaffeLossProp : public OperatorProperty {
+ public:
+  std::vector<std::string> ListArguments() const override {
+    return {"data", "label"};
+  }
+
+  void Init(const std::vector<std::pair<std::string, std::string> >& kwargs) override {
+    param_.Init(kwargs);
+    CHECK_EQ(param_.num_out, 1);
+    CHECK_EQ(param_.num_data, 2);
+
+    // Fetch grad_scale from prototxt
+    if ((param_.prototxt.loss_weight_size() > 0))
+      param_.grad_scale = param_.prototxt.loss_weight(0);
+  }
+
+  std::map<std::string, std::string> GetParams() const override {
+    return param_.__DICT__();
+  }
+
+  /*brief Set up caffeop to infer output shape*/
+  bool InferShape(std::vector<TShape> *in_shape,
+                  std::vector<TShape> *out_shape,
+                  std::vector<TShape> *aux_shape) const override {
+    using namespace mshadow;
+    using ::caffe::Blob;
+    using std::vector;
+    if (caffeOp_ == NULL)
+      caffeOp_ = caffe::LayerRegistry<float>::CreateLayer(param_.prototxt);
+
+    CHECK_GE(in_shape->size(), param_.num_data);
+    // Initialize empty bottom & top blobs for caffeOp setup
+    vector<Blob<float> *> bot_blobs, top_blobs;
+
+    for (int i = 0; i < param_.num_data; ++i) {
+      TShape tshape = (*in_shape)[i];
+      if (tshape.ndim() == 0) return false;
+      auto blob_ptr = new Blob<float>();
+      blob_ptr->Reshape(caffe::TShape2Vector(tshape));
+      bot_blobs.push_back(blob_ptr);
+    }
+
+    for (int i = 0; i < param_.num_out; ++i)
+      top_blobs.push_back(new Blob<float>());
+
+    caffeOp_->SetUp(bot_blobs, top_blobs);
+    CHECK_EQ(in_shape->size(), caffeOp_->blobs().size() + param_.num_data);
+    // Initialize out shapes
+    out_shape->clear();
+    for (auto blob : top_blobs) {
+      TShape tshape = caffe::Vector2TShape(blob->shape());
+      out_shape->push_back(tshape);
+    }
+
+    for (auto blob_ptr : bot_blobs)
+      delete blob_ptr;
+    for (auto blob_ptr : top_blobs)
+      delete blob_ptr;
+
+    return true;
+  }
+
+  OperatorProperty* Copy() const override {
+    auto copy_prop = new CaffeLossProp();
+    copy_prop->param_ = this->param_;
+    return copy_prop;
+  }
+
+  std::string TypeString() const override {
+    return "CaffeLoss";
+  }
+
+  std::vector<int> DeclareBackwardDependency(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data) const override {
+    std::vector<int> dep;
+    dep.insert(dep.end(), in_data.begin(), in_data.end());
+    dep.insert(dep.end(), out_data.begin(), out_data.end());
+    return dep;
+  }
+
+  Operator* CreateOperator(Context ctx) const override {
+    LOG(FATAL) << "Not Implemented.";
+    return NULL;
+  }
+
+  Operator* CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+                             std::vector<int> *in_type) const override;
+
+
+ private:
+  mutable CaffeLossParam param_;
+  mutable ::caffe::Layer<float> *caffeOp_;
+};  // class CaffeLossSymbol
+#endif
+
+}  // namespace op
+}  // namespace mxnet
+#endif  // PLUGIN_CAFFE_CAFFE_LOSS_INL_H_
