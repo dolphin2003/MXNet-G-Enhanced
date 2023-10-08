@@ -51,4 +51,38 @@ class FieldEntry<caffe::LayerParameter>
    * /brief Customize set method for LayerParameter
    * /tparam value string of caffe's layer configuration
    * */
-  virtual void Set(void *head, co
+  virtual void Set(void *head, const std::string &value) const {
+    caffe::NetParameter net_param;
+    if (!ReadProtoFromTextContent(value, &net_param))
+      CHECK(false)<< "Caffe Net Prototxt: " << value << "Initialized Failed";
+
+    CHECK_EQ(net_param.layer_size(), 1) << "Prototxt" << value <<" more than a layer";
+    caffe::LayerParameter *layer_param = new caffe::LayerParameter(net_param.layer(0));
+    this->Get(head) = (*layer_param);
+  }
+
+  virtual void PrintValue(std::ostream &os, caffe::LayerParameter value) const { // NOLINT(*)
+  }
+
+  virtual void PrintDefaultValueString(std::ostream &os) const {  // NOLINT(*)
+    os << '\'' << default_value_.name().c_str() << '\'';
+  }
+
+  // override set_default
+  inline FieldEntry<caffe::LayerParameter> &set_default(const std::string &value) {
+    caffe::NetParameter net_param;
+    if (!ReadProtoFromTextContent(value, &net_param))
+      CHECK(false)<< "Caffe Net Prototxt: " << value << "Initialized Failed";
+
+    CHECK_EQ(net_param.layer_size(), 1) << "Protoxt " << value <<" is more than one layer";
+    default_value_ = caffe::LayerParameter(net_param.layer(0));
+    has_default_ = true;
+    // return self to allow chaining
+    return this->self();
+  }
+};
+
+}  // namespace parameter
+}  // namespace dmlc
+
+#endif  // PLUGIN_CAFFE_CAFFE_FIELDENTRY_H_
