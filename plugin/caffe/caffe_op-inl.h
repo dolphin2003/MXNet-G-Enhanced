@@ -295,4 +295,35 @@ class CaffeOpProp : public OperatorProperty {
 
     for (auto blob_ptr : bot_blobs)
       delete blob_ptr;
-    
+    for (auto blob_ptr : top_blobs)
+      delete blob_ptr;
+    return true;
+  }
+
+  OperatorProperty* Copy() const override {
+    auto copy_prop = new CaffeOpProp();
+    copy_prop->param_ = this->param_;
+    return copy_prop;
+  }
+
+  std::string TypeString() const override {
+    return "CaffeOp";
+  }
+
+  Operator* CreateOperator(Context ctx) const override {
+    LOG(FATAL) << "Not Implemented.";
+    return NULL;
+  }
+
+  Operator* CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+                             std::vector<int> *in_type) const override;
+
+ private:
+  mutable CaffeOpParam param_;
+  mutable ::caffe::Layer<float> *caffeOp_;
+};  // class CaffeOpSymbol
+#endif
+
+}  // namespace op
+}  // namespace mxnet
+#endif  // PLUGIN_CAFFE_CAFFE_OP_INL_H_
