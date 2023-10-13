@@ -80,3 +80,59 @@ struct TorchMMShape {
     mshadow::TShape tshape(shape, shape+2);
     return {tshape};
   }
+  static constexpr const char* fname = "mm";
+  static const int num_inputs = 2;
+  static const int num_outputs = 1;
+};
+MXNET_REGISTER_TORCH_FUN(_th_mm, TorchMMShape);
+
+struct TorchMVShape {
+  static std::vector<mshadow::TShape> GetShape(NDArray **u,
+    const std::map<std::string, std::string>& param) {
+    CHECK_EQ(u[0]->shape().ndim(), 2);
+    CHECK_EQ(u[1]->shape().ndim(), 1);
+    CHECK_EQ(u[0]->shape()[1], u[1]->shape()[0]);
+    index_t shape[] = {u[0]->shape()[0]};
+    mshadow::TShape tshape(shape, shape+1);
+    return {tshape};
+  }
+  static constexpr const char* fname = "mv";
+  static const int num_inputs = 2;
+  static const int num_outputs = 1;
+};
+MXNET_REGISTER_TORCH_FUN(_th_mv, TorchMVShape);
+
+
+struct TorchBMMShape {
+  static std::vector<mshadow::TShape> GetShape(NDArray **u,
+    const std::map<std::string, std::string>& param) {
+    CHECK_EQ(u[0]->shape().ndim(), 3);
+    CHECK_EQ(u[1]->shape().ndim(), 3);
+    CHECK_EQ(u[0]->shape()[0], u[1]->shape()[0]);
+    CHECK_EQ(u[0]->shape()[2], u[1]->shape()[1]);
+    index_t shape[] = {u[0]->shape()[1], u[1]->shape()[2]};
+    mshadow::TShape tshape(shape, shape+2);
+    return {tshape};
+  }
+  static constexpr const char* fname = "bmm";
+  static const int num_inputs = 2;
+  static const int num_outputs = 1;
+};
+MXNET_REGISTER_TORCH_FUN(_th_bmm, TorchBMMShape);
+
+struct TorchGERShape {
+  static std::vector<mshadow::TShape> GetShape(NDArray **u,
+    const std::map<std::string, std::string>& param) {
+    CHECK_EQ(u[0]->shape().ndim(), 1);
+    CHECK_EQ(u[1]->shape().ndim(), 1);
+    index_t shape[] = {u[0]->shape()[0], u[1]->shape()[0]};
+    mshadow::TShape tshape(shape, shape+2);
+    return {tshape};
+  }
+  static constexpr const char* fname = "ger";
+  static const int num_inputs = 2;
+  static const int num_outputs = 1;
+};
+MXNET_REGISTER_TORCH_FUN(_th_ger, TorchGERShape);
+
+}  // namespace mxnet
