@@ -185,4 +185,32 @@ struct TorchConstructorShape {
   .add_argument("x", "NDArray", "Input NDArray")
 
 #define MXNET_REGISTER_TORCH_BINARY_FUN(name, func)                           \
-  struct Tor
+  struct TorchBinaryOpDesc_ ## name ## _ ## func : public TorchFirstShape {   \
+    static constexpr const char* fname = #func;                               \
+    static const int num_inputs = 2;                                          \
+    static const int num_outputs = 1;                                         \
+  };                                                                          \
+  MXNET_REGISTER_TORCH_FUN(name, TorchBinaryOpDesc_ ## name ## _ ## func)
+
+#define MXNET_REGISTER_TORCH_BINARY_FUN_WITH_ARG(name, func)                  \
+  MXNET_REGISTER_TORCH_BINARY_FUN(name, func)                                 \
+  .add_argument("x1", "NDArray", "First Input NDArray")                       \
+  .add_argument("x2", "NDArray", "Second Input NDArray")
+
+#define MXNET_REGISTER_TORCH_TENARY_FUN(name, func)                           \
+  struct TorchTenaryOpDesc_ ## name ## _ ## func : public TorchFirstShape {   \
+    static constexpr const char* fname = #func;                               \
+    static const int num_inputs = 3;                                          \
+    static const int num_outputs = 1;                                         \
+  };                                                                          \
+  MXNET_REGISTER_TORCH_FUN(name, TorchTenaryOpDesc_ ## name ## _ ## func)
+
+#define MXNET_REGISTER_TORCH_CONSTRUCTOR_FUN(name, func)                                  \
+  struct TorchConstructorOpDesc_ ## name ## _ ## func : public TorchConstructorShape {    \
+    static constexpr const char* fname = #func;                                           \
+  };                                                                                      \
+  MXNET_REGISTER_TORCH_FUN(name, TorchConstructorOpDesc_ ## name ## _ ## func)
+
+
+}  // namespace mxnet
+#endif  // PLUGIN_TORCH_TORCH_FUNCTION_H_
