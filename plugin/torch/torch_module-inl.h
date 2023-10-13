@@ -137,4 +137,177 @@ class TorchModuleOp : public Operator {
     lua_getfield(L, -1, "updateOutput");
     // | self | updateOutput
     lua_pushvalue(L, -2);
-    // | se
+    // | self | updateOutput | self
+    TorchTensor::TBlobVectorAsTable(torchState_, in_data.begin(),
+                                    in_data.begin() + param_.num_data);
+    // | self | updateOutput | self | inputs
+    int err = lua_pcall(L, 2, 1, 0);  // doesn't need the output
+    CHECK_EQ(err, 0) << lua_tostring(L, -1);
+    TorchTensor::CheckOutput(torchState_, out_data.begin(), out_data.begin() + param_.num_outputs,
+                             th_output.begin(), th_output.end());
+    lua_pop(L, 2);
+    CHECK_EQ(lua_gettop(L), 0);
+  }
+
+  virtual void Backward(const OpContext &ctx,
+                        const std::vector<TBlob> &out_grad,
+                        const std::vector<TBlob> &in_data,
+                        const std::vector<TBlob> &out_data,
+                        const std::vector<OpReqType> &req,
+                        const std::vector<TBlob> &in_grad,
+                        const std::vector<TBlob> &aux_args) {
+    lua_State* L = torchState_->L;
+    CHECK_EQ(lua_gettop(L), 0);
+    CHECK_EQ(in_data.size(), param_.num_params + param_.num_data);
+    CHECK_EQ(out_data.size(), param_.num_outputs);
+    CHECK_EQ(out_grad.size(), param_.num_outputs);
+    CHECK_EQ(in_grad.size(), param_.num_params + param_.num_data);
+    mshadow::Stream<xpu> *s = ctx.get_stream<xpu>();
+    torchState_->SetStream(s);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, lua_reference_);
+    TorchTensor::TBlobVectorAsTable(torchState_, out_data.begin(), out_data.end());
+    lua_setfield(L, -2, "output");
+    std::vector<THGeneralTensor> th_grad =
+      TorchTensor::TBlobVectorAsTable(torchState_, in_grad.begin(),
+                                      in_grad.begin() + param_.num_data);
+    lua_setfield(L, -2, "gradInput");
+    if (param_.num_params != 0) {
+      // get the parameters into the stack
+      lua_getfield(L, -1, "parameters");
+      lua_pushvalue(L, -2);
+      int err = lua_pcall(L, 1, LUA_MULTRET, 0);
+      CHECK_EQ(err, 0) << lua_tostring(L, -1);
+      // iterate the parameters table to put tblobs inside
+      lua_pushnil(L);
+      std::vector<TBlob>::const_iterator it = in_data.begin() + param_.num_data;
+      while (lua_next(L, -3)) {
+        TorchTensor::SetInternal(
+          torchState_,
+          static_cast<THGeneralTensor>(luaT_toudata(L, -1, TorchTensor::TensorType(*it))),
+          *it);
+        it++;
+        lua_pop(L, 1);
+      }
+      // iterate the grad of params
+      lua_pushnil(L);
+      it = in_grad.begin() + param_.num_data;;
+      while (lua_next(L, -2)) {
+        TorchTensor::SetInternal(
+          torchState_,
+          static_cast<THGeneralTensor>(luaT_toudata(L, -1, TorchTensor::TensorType(*it))),
+          *it);
+        it++;
+        lua_pop(L, 1);
+      }
+      lua_pop(L, 2);  // pop the parameters
+    }
+    lua_getfield(L, -1, "zeroGradParameters");
+    lua_pushvalue(L, -2);
+    CHECK_EQ(lua_pcall(L, 1, 0, 0), 0);
+    TorchTensor::TBlobVectorAsTable(torchState_, in_data.begin(),
+                                    in_data.begin() + param_.num_data);
+    TorchTensor::TBlobVectorAsTable(torchState_, out_grad.begin(), out_grad.end());
+    // call
+    lua_getfield(L, -3, "accGradParameters");
+    lua_pushvalue(L, -4);
+    lua_pushvalue(L, -4);
+    lua_pushvalue(L, -4);
+    lua_pushnumber(L, 1);
+    int err = lua_pcall(L, 4, 0, 0);  // doesn't need the output
+    CHECK_EQ(err, 0) << lua_tostring(L, -1);
+    lua_getfield(L, -3, "updateGradInput");
+    lua_pushvalue(L, -4);
+    lua_pushvalue(L, -4);
+    lua_pushvalue(L, -4);
+    err = lua_pcall(L, 3, 1, 0);  // doesn't need the output
+    CHECK_EQ(err, 0) << lua_tostring(L, -1);
+    TorchTensor::CheckOutput(torchState_, in_grad.begin(), in_grad.begin() + param_.num_data,
+                             th_grad.begin(), th_grad.end());
+    lua_pop(L, 4);
+    CHECK_EQ(lua_gettop(L), 0);
+  }
+};  // class TorchModuleOp
+
+// Declare Factory function, used for dispatch specialization
+template<typename xpu>
+Operator* CreateOp(TorchModuleParam type, TorchState* torchState);
+
+#if DMLC_USE_CXX11
+class TorchModuleProp : public OperatorProperty {
+ protected:
+  mutable std::vector<std::string> arguments_;
+  mutable TorchState* torchState_;
+  mutable int lua_reference_;
+
+  void InitTorchState() const {
+    this->torchState_ = new TorchState();
+    lua_State* L = torchState_->L;
+    std::string exec = std::string("return ") + param_.lua_string;
+    CHECK_EQ(luaL_loadstring(L, exec.c_str()), 0);
+    int err = lua_pcall(L, 0, LUA_MULTRET, 0);
+    CHECK_EQ(lua_gettop(L), 1);
+    CHECK_EQ(err, 0) << lua_tostring(L, -1);
+    lua_getfield(L, -1, "float");
+    lua_pushvalue(L, -2);
+    err = lua_pcall(L, 1, 1, 0);
+    CHECK_EQ(err, 0);
+    lua_reference_ = lua_ref(L, LUA_REGISTRYINDEX);
+    lua_pop(L, 1);
+
+    CHECK_EQ(lua_gettop(L), 0);
+  }
+
+ public:
+  TorchModuleProp() : OperatorProperty(), torchState_(NULL), lua_reference_(-1) {
+  }
+
+  std::vector<std::string> ListArguments() const override {
+    if (!torchState_) {
+      InitTorchState();
+    }
+    lua_State* L = torchState_->L;
+
+    if (arguments_.size() == 0) {
+      for (uint32_t i = 0; i < param_.num_data; ++i) {
+        std::string data = "data_" + std::to_string(i);
+        arguments_.push_back(data);
+      }
+      std::string lua_code =
+          "return function(module)\n"
+          "          local params = module:parameters()\n"
+          "          local dict = {}\n"
+          "          if params == nil then\n"
+          "             return {}\n"
+          "          end\n"
+          "          for id, p in ipairs(params) do\n"
+          "             dict[p] = string.format('param_%d', id)\n"
+          "          end\n"
+          "          for key, value in pairs(module) do\n"
+          "             if dict[value] then\n"
+          "                dict[value] = key\n"
+          "             end\n"
+          "          end\n"
+          "          local ret = {}\n"
+          "          for _, p in ipairs(params) do\n"
+          "             table.insert(ret, dict[p])\n"
+          "          end\n"
+          "          return ret\n"
+          "end\n";
+      luaL_loadstring(L, lua_code.c_str());
+      int err = lua_pcall(L, 0, 1, 0);  // return the function
+      CHECK_EQ(err, 0) << lua_tostring(L, -1);
+      lua_rawgeti(L, LUA_REGISTRYINDEX, lua_reference_);
+      err = lua_pcall(L, 1, 1, 0);  // call the function
+      CHECK_EQ(err, 0) << lua_tostring(L, -1);
+      lua_pushnil(L);
+      while (lua_next(L, -2)) {
+        arguments_.push_back(lua_tostring(L, -1));
+        lua_pop(L, 1);
+      }
+      lua_pop(L, 1);
+    }
+    return arguments_;
+  }
+
+  virtual std::vector<std::string> ListOutputs() const {
+    if (param_.num_outp
