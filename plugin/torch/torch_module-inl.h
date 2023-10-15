@@ -310,4 +310,131 @@ class TorchModuleProp : public OperatorProperty {
   }
 
   virtual std::vector<std::string> ListOutputs() const {
-    if (param_.num_outp
+    if (param_.num_outputs > 1) {
+      std::vector<std::string> ret;
+      std::string output = "output";
+      for (uint32_t i = 0; i < param_.num_outputs; ++i) {
+        ret.push_back(output + std::to_string(i));
+      }
+      return ret;
+    } else {
+      return {"output"};
+    }
+  }
+  void Init(const std::vector<std::pair<std::string, std::string> >& kwargs) override {
+    param_.Init(kwargs);
+  }
+  std::map<std::string, std::string> GetParams() const override {
+    return param_.__DICT__();
+  }
+
+  bool InferShape(std::vector<TShape> *in_shape,
+                  std::vector<TShape> *out_shape,
+                  std::vector<TShape> *aux_shape) const override {
+    if (torchState_ == nullptr) {
+      this->InitTorchState();
+    }
+    lua_State* L = torchState_->L;
+
+    CHECK_EQ(lua_gettop(L), 0);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, lua_reference_);
+    CHECK_EQ(in_shape->size(), param_.num_data + param_.num_params);
+    CHECK_EQ(out_shape->size(), param_.num_outputs);
+    CHECK_EQ(aux_shape->size(), 0);
+    lua_getfield(L, -1, "updateOutput");
+    lua_pushvalue(L, -2);  // self
+    if (param_.num_data == 1) {
+      THLongStorage* thshape = THLongStorage_newWithSize((*in_shape)[0].ndim());
+      for (uint32_t i = 0; i < (*in_shape)[0].ndim(); ++i) {
+        THLongStorage_set(thshape, i, (*in_shape)[0][i]);
+      }
+      THFloatTensor* in_data = THFloatTensor_newWithSize(thshape, NULL);
+      THLongStorage_free(thshape);
+      luaT_pushudata(L, in_data, TorchTensor::TensorType(mshadow::cpu::kDevMask));
+    } else if (param_.num_data > 1) {
+      lua_createtable(L, param_.num_data, 0);
+      for (uint32_t data_index = 0; data_index < param_.num_data; ++data_index) {
+        THLongStorage* thshape = THLongStorage_newWithSize((*in_shape)[data_index].ndim());
+        for (uint32_t i = 0; i < (*in_shape)[data_index].ndim(); ++i) {
+          THLongStorage_set(thshape, i, (*in_shape)[data_index][i]);
+        }
+        THFloatTensor* in_data = THFloatTensor_newWithSize(thshape, NULL);
+        THLongStorage_free(thshape);
+        luaT_pushudata(L, in_data, TorchTensor::TensorType(mshadow::cpu::kDevMask));
+        lua_rawseti(L, -2, data_index);
+      }
+    }
+    int err = lua_pcall(L, 2, 0, 0);
+    CHECK_EQ(err, 0) << lua_tostring(L, -1);
+    if (param_.num_params != 0) {
+      lua_getfield(L, -1, "parameters");
+      lua_pushvalue(L, -2);
+      int err = lua_pcall(L, 1, LUA_MULTRET, 0);
+      CHECK_EQ(err, 0);
+      CHECK_EQ(lua_gettop(L), 3);
+      lua_pushnil(L);
+      int index = param_.num_data;
+      while (lua_next(L, -3)) {
+        THFloatTensor* param = reinterpret_cast<THFloatTensor*>(luaT_toudata(L, -1,
+          TorchTensor::TensorType(mshadow::cpu::kDevMask)));
+        long int* size = param->size;  // NOLINT(*)
+        (*in_shape)[index++] = TShape(size, size + THFloatTensor_nDimension(param));
+        lua_pop(L, 1);
+      }
+      lua_pop(L, 2);
+    }
+    lua_getfield(L, -1, "output");
+    if (param_.num_outputs == 0) {
+    } else if (param_.num_outputs == 1) {
+      THFloatTensor* output = reinterpret_cast<THFloatTensor*>(luaT_toudata(L, -1,
+        TorchTensor::TensorType(mshadow::cpu::kDevMask)));
+      long int* size = output->size;  // NOLINT(*)
+      (*out_shape)[0] = TShape(size, size + THFloatTensor_nDimension(output));
+    } else {
+      for (uint32_t data_index = 0; data_index < param_.num_outputs; ++data_index) {
+        lua_pushnil(L);
+        int index = 0;
+        while (lua_next(L, -2)) {
+          THFloatTensor* out = reinterpret_cast<THFloatTensor*>(luaT_toudata(L, -1,
+            TorchTensor::TensorType(mshadow::cpu::kDevMask)));
+          long int* size = out->size;  // NOLINT(*)
+          (*out_shape)[index++] = TShape(size, size + THFloatTensor_nDimension(out));
+        }
+      }
+    }
+    lua_pop(L, 2);
+    CHECK_EQ(lua_gettop(L), 0);
+    return true;
+  }
+
+  OperatorProperty* Copy() const override {
+    auto ptr = new TorchModuleProp();
+    ptr->param_ = param_;
+    return ptr;
+  }
+
+  std::string TypeString() const override {
+    return "TorchModule";
+  }
+
+  // decalre dependency and inplace optimization options
+  std::vector<int> DeclareBackwardDependency(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data) const override {
+    std::vector<int> dep;
+    dep.insert(dep.end(), out_grad.begin(), out_grad.end());
+    dep.insert(dep.end(), out_data.begin(), out_data.end());
+    dep.insert(dep.end(), in_data.begin(), in_data.end());
+    return dep;
+  }
+
+  Operator* CreateOperator(Context ctx) const override;
+
+ private:
+  TorchModuleParam param_;
+};
+#endif  // DMLC_USE_CXX11
+}  // namespace op
+}  // namespace mxnet
+#endif  // PLUGIN_TORCH_TORCH_MODULE_INL_H_
