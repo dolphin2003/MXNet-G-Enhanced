@@ -255,4 +255,39 @@ class WarpCTCProp : public OperatorProperty {
     return true;
   }
 
-  std::vector<ResourceRequest> BackwardResou
+  std::vector<ResourceRequest> BackwardResource(
+      const std::vector<TShape> &in_shape) const override {
+    return {ResourceRequest::kTempSpace};
+  }
+
+  OperatorProperty* Copy() const override {
+    auto ptr = new WarpCTCProp();
+    ptr->param_ = param_;
+    return ptr;
+  }
+
+  std::string TypeString() const override {
+    return "WarpCTC";
+  }
+
+
+  std::vector<int> DeclareBackwardDependency(const std::vector<int> &out_grad,
+                                             const std::vector<int> &in_data,
+                                             const std::vector<int> &out_data)
+      const override {
+    return {in_data[warpctc_enum::kData],
+          in_data[warpctc_enum::kLabel],
+          out_data[warpctc_enum::kOut]};
+  }
+
+  Operator* CreateOperator(Context ctx) const override;
+
+ private:
+  WarpCTCParam param_;
+};
+#endif  // DMLC_USE_CXX11
+
+}  // namespace op
+}  // namespace mxnet
+
+#endif  // PLUGIN_WARPCTC_WARPCTC_INL_H_
