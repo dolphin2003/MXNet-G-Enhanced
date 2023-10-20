@@ -304,4 +304,56 @@ class Executor(object):
                         "First making a big executor and then down sizing it " + \
                         "is more efficient than the reverse." + \
                         "If you really want to up size, set allow_up_sizing=True " + \
-                    
+                        "to enable allocation of new arrays."
+                    new_arg_dict[name] = nd.empty(new_shape, ctx=arr.context)
+                    if darr is not None:
+                        new_grad_dict[name] = nd.empty(new_shape, ctx=darr.context)
+                else:
+                    new_arg_dict[name] = arr.reshape(new_shape)
+                    if darr is not None:
+                        new_grad_dict[name] = darr.reshape(new_shape)
+            else:
+                raise AssertionError("Shape of unspecified array arg:%s changed. "%name + \
+                    "This can cause the new executor to not share parameters " + \
+                    "with the old one. Please check for error in network." +\
+                    "If this is intended, set partial_shaping=True to suppress this warning.")
+
+        new_aux_dict = {}
+        for name, new_shape, arr in zip(self._symbol.list_auxiliary_states(),
+                                        aux_shapes, self.aux_arrays):
+            if partial_shaping or new_shape == arr.shape:
+                if np.prod(new_shape) > np.prod(arr.shape):
+                    assert allow_up_sizing, "New shape of arg:%s larger than original. "%name + \
+                        "First making a big executor and then down sizing it " + \
+                        "is more efficient than the reverse." + \
+                        "If you really want to up size, set allow_up_sizing=True " + \
+                        "to enable allocation of new arrays."
+                    new_aux_dict[name] = nd.empty(new_shape, ctx=arr.context)
+                else:
+                    new_aux_dict[name] = arr.reshape(new_shape)
+            else:
+                raise AssertionError("Shape of unspecified array aux:%s changed. "%name + \
+                    "This can cause the new executor to not share parameters " + \
+                    "with the old one. Please check for error in network." +\
+                    "If this is intended, set partial_shaping=True to suppress this warning.")
+
+        return self._symbol.bind(self._ctx,
+                                 args=new_arg_dict,
+                                 args_grad=new_grad_dict,
+                                 grad_req=self._grad_req,
+                                 aux_states=new_aux_dict,
+                                 group2ctx=self._group2ctx,
+                                 shared_exec=self)
+
+    def debug_str(self):
+        """Get a debug string about internal execution plan.
+
+        Returns
+        -------
+        debug_str : string
+            Debug string of the executor.
+        """
+        debug_str = ctypes.c_char_p()
+        check_call(_LIB.MXExecutorPrint(
+            self.handle, ctypes.byref(debug_str)))
+        return py_str(debug_str.value)
