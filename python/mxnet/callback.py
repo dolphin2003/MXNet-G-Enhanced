@@ -77,4 +77,47 @@ class Speedometer(object):
 
     def __call__(self, param):
         """Callback to Show speed."""
-        count = para
+        count = param.nbatch
+        if self.last_count > count:
+            self.init = False
+        self.last_count = count
+
+        if self.init:
+            if count % self.frequent == 0:
+                speed = self.frequent * self.batch_size / (time.time() - self.tic)
+                if param.eval_metric is not None:
+                    name_value = param.eval_metric.get_name_value()
+                    param.eval_metric.reset()
+                    for name, value in name_value:
+                        logging.info('Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec\tTrain-%s=%f',
+                                     param.epoch, count, speed, name, value)
+                else:
+                    logging.info("Iter[%d] Batch [%d]\tSpeed: %.2f samples/sec",
+                                 param.epoch, count, speed)
+                self.tic = time.time()
+        else:
+            self.init = True
+            self.tic = time.time()
+
+
+class ProgressBar(object):
+    """Show a progress bar.
+
+    Parameters
+    ----------
+    total: int
+        total batch size
+    length: int
+        length or progress bar
+    """
+    def __init__(self, total, length=80):
+        self.bar_len = length
+        self.total = total
+
+    def __call__(self, param):
+        """Callback to Show progress bar."""
+        count = param.nbatch
+        filled_len = int(round(self.bar_len * count / float(self.total)))
+        percents = math.ceil(100.0 * count / float(self.total))
+        prog_bar = '=' * filled_len + '-' * (self.bar_len - filled_len)
+        sys.stdout.write('[%s] %s%s\r' % (prog_bar, percents, '%'))
