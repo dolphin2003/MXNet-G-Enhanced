@@ -130,4 +130,178 @@ class Executor(object):
             This parameter is only needed when bind is called
             on outputs that are not a loss function.
         """
-        if out_gra
+        if out_grads is None:
+            out_grads = []
+        elif isinstance(out_grads, NDArray):
+            out_grads = [out_grads]
+        elif isinstance(out_grads, dict):
+            out_grads = [out_grads[k] for k in self._symbol.list_outputs()]
+
+        for obj in out_grads:
+            if not isinstance(obj, NDArray):
+                raise TypeError("inputs must be NDArray")
+        ndarray = c_array(NDArrayHandle, [item.handle for item in out_grads])
+        check_call(_LIB.MXExecutorBackward(
+            self.handle,
+            mx_uint(len(out_grads)),
+            ndarray))
+
+    def set_monitor_callback(self, callback):
+        """Install callback.
+
+        Parameters
+        ----------
+        callback : function
+            Takes a string and an NDArrayHandle.
+        """
+        cb_type = ctypes.CFUNCTYPE(None, ctypes.c_char_p, NDArrayHandle, ctypes.c_void_p)
+        self._monitor_callback = cb_type(_monitor_callback_wrapper(callback))
+        check_call(_LIB.MXExecutorSetMonitorCallback(
+            self.handle,
+            self._monitor_callback,
+            None))
+
+    @property
+    def arg_dict(self):
+        """Get dictionary representation of argument arrrays.
+
+        Returns
+        -------
+        arg_dict : dict of str to NDArray
+            The dictionary that maps name of arguments to NDArrays.
+
+        Raises
+        ------
+        ValueError : if there are duplicated names in the arguments.
+        """
+        if self._arg_dict is None:
+            self._arg_dict = Executor._get_dict(
+                self._symbol.list_arguments(), self.arg_arrays)
+        return self._arg_dict
+
+    @property
+    def grad_dict(self):
+        """Get dictionary representation of gradient arrays.
+
+        Returns
+        -------
+        grad_dict : dict of str to NDArray
+            The dictionary that maps name of arguments to gradient arrays.
+        """
+        if self._grad_dict is None:
+            self._grad_dict = Executor._get_dict(
+                self._symbol.list_arguments(), self.grad_arrays)
+        return self._grad_dict
+
+    @property
+    def aux_dict(self):
+        """Get dictionary representation of auxiliary states arrays.
+
+        Returns
+        -------
+        aux_dict : dict of str to NDArray
+            The dictionary that maps name of auxiliary states to NDArrays.
+
+        Raises
+        ------
+        ValueError : if there are duplicated names in the auxiliary states.
+        """
+        if self._aux_dict is None:
+            self._aux_dict = Executor._get_dict(
+                self._symbol.list_auxiliary_states(), self.aux_arrays)
+        return self._aux_dict
+
+    @property
+    def output_dict(self):
+        """Get dictionary representation of output arrays.
+
+        Returns
+        -------
+        output_dict : dict of str to NDArray
+            The dictionary that maps name of output names to NDArrays.
+
+        Raises
+        ------
+        ValueError : if there are duplicated names in the outputs.
+        """
+        if self._output_dict is None:
+            self._output_dict = Executor._get_dict(
+                self._symbol.list_outputs(), self.outputs)
+        return self._output_dict
+
+    def copy_params_from(self, arg_params, aux_params=None, allow_extra_params=False):
+        """Copy parameters from arg_params, aux_params into executor's internal array.
+
+        Parameters
+        ----------
+        arg_params : dict of str to NDArray
+            Parameters, dict of name to NDArray of arguments
+
+        aux_params : dict of str to NDArray, optional
+            Parameters, dict of name to NDArray of auxiliary states.
+
+        allow_extra_params : boolean, optional
+            Whether allow extra parameters that are not needed by symbol
+            If this is True, no error will be thrown when arg_params or aux_params
+            contain extra parameters that is not needed by the executor.
+
+        Raises
+        ------
+        ValueError
+            If there is additional parameters in the dict but allow_extra_params=False
+        """
+        for name, array in arg_params.items():
+            if name in self.arg_dict:
+                dst = self.arg_dict[name]
+                array.astype(dst.dtype).copyto(dst)
+            else:
+                if not allow_extra_params:
+                    raise ValueError('Find name \"%s\" that is not in the arguments' % name)
+        if aux_params is None:
+            aux_params = {}
+        for name, array in aux_params.items():
+            if name in self.aux_dict:
+                dst = self.aux_dict[name]
+                array.astype(dst.dtype).copyto(dst)
+            else:
+                if not allow_extra_params:
+                    raise ValueError('Find name %s that is not in the auxiliary states' % name)
+
+    def reshape(self, partial_shaping=False, allow_up_sizing=False, **kwargs):
+        """Return a new executor with the same symbol and shared memory,
+        but different input/output shapes.
+        For runtime reshaping, variable length sequences, etc.
+        The returned executor shares state with the current one,
+        and cannot be used in parallel with it.
+
+        Parameters
+        ----------
+        partial_shaping : bool
+            Whether to allow changing the shape of unspecified arguments.
+        allow_up_sizing : bool
+            Whether to allow allocating new ndarrays that's larger than the original.
+        kwargs : dict of string to tuple of int
+            new shape for arguments.
+        Returns
+        -------
+        exec : Executor
+            A new executor that shares memory with self.
+        """
+        # pylint: disable=too-many-branches
+        arg_shapes, _, aux_shapes = self._symbol.infer_shape(**kwargs)
+        if arg_shapes is None:
+            raise ValueError("Insufficient argument shapes provided.")
+
+        new_arg_dict = {}
+        new_grad_dict = {}
+        for i, name in enumerate(self._symbol.list_arguments()):
+            new_shape = arg_shapes[i]
+            arr = self.arg_arrays[i]
+            darr = None if self.grad_arrays is None else self.grad_arrays[i]
+            if partial_shaping or name in kwargs or new_shape == arr.shape:
+                if np.prod(new_shape) > np.prod(arr.shape):
+                    assert allow_up_sizing, "New shape of arg:%s larger than original. "%name + \
+                        "First making a big executor and then down sizing it " + \
+                        "is more efficient than the reverse." + \
+                        "If you really want to up size, set allow_up_sizing=True " + \
+                    
