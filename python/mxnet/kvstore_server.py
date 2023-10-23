@@ -51,4 +51,18 @@ class KVStoreServer(object):
         >>> while receive(x):
         ...     if is_command x: controller(x)
         ...     else if is_key_value x: updater(x)
-        
+        """
+        _ctrl_proto = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)
+        check_call(_LIB.MXKVStoreRunServer(self.handle, _ctrl_proto(self._controller()), None))
+
+def _init_kvstore_server_module():
+    """Start server/scheduler"""
+    is_worker = ctypes.c_int()
+    check_call(_LIB.MXKVStoreIsWorkerNode(ctypes.byref(is_worker)))
+    if is_worker.value == 0:
+        kvstore = create('dist')
+        server = KVStoreServer(kvstore)
+        server.run()
+        sys.exit()
+
+_init_kvstore_server_module()
