@@ -218,4 +218,165 @@ class KVStore(object):
         [ 2.  2.  2.]]
         >>> # On multiple devices
         >>> b = [[mx.nd.ones(shape, gpu) for gpu in gpus]] * len(keys)
-       
+        >>> kv.pull(keys, out=b)
+        >>> print b[1][1].asnumpy()
+        [[ 2.  2.  2.]
+        [ 2.  2.  2.]]
+        """
+        assert(out is not None)
+        ckeys, cvals = _ctype_key_value(key, out)
+        check_call(_LIB.MXKVStorePull(
+            self.handle, mx_uint(len(ckeys)), ckeys, cvals,
+            ctypes.c_int(priority)))
+
+    def set_optimizer(self, optimizer):
+        """Register an optimizer to the store
+
+        If there are multiple machines, this process (should be a worker node)
+        will pack this optimizer and send it to all servers. It returns after
+        this action is done.
+
+        Parameters
+        ----------
+        optimizer : Optimizer
+            the optimizer
+        """
+        is_worker = ctypes.c_int()
+        check_call(_LIB.MXKVStoreIsWorkerNode(ctypes.byref(is_worker)))
+
+        # pylint: disable=invalid-name
+        if 'dist' in self.type and is_worker.value:
+            # send the optimizer to server
+            try:
+                # use ASCII protocol 0, might be slower, but not a big ideal
+                optim_str = pickle.dumps(optimizer, 0)
+            except:
+                raise
+            self._send_command_to_servers(0, optim_str)
+        else:
+            self._set_updater(opt.get_updater(optimizer))
+
+    @property
+    def type(self):
+        """Get the type of this kvstore
+
+        Returns
+        -------
+        type : str
+            the string type
+        """
+        kv_type = ctypes.c_char_p()
+        check_call(_LIB.MXKVStoreGetType(self.handle, ctypes.byref(kv_type)))
+        return py_str(kv_type.value)
+
+    @property
+    def rank(self):
+        """Get the rank of this worker node
+
+        Returns
+        -------
+        rank : int
+            The rank of this node, which is in [0, get_num_workers())
+        """
+        rank = ctypes.c_int()
+        check_call(_LIB.MXKVStoreGetRank(self.handle, ctypes.byref(rank)))
+        return rank.value
+
+    @property
+    def num_workers(self):
+        """Get the number of worker ndoes
+
+        Returns
+        -------
+        size :int
+            The number of worker nodes
+        """
+        size = ctypes.c_int()
+        check_call(_LIB.MXKVStoreGetGroupSize(self.handle, ctypes.byref(size)))
+        return size.value
+
+    def _set_updater(self, updater):
+        """Set a push updater into the store.
+
+        This function only changes the local store. Use set_optimizer for
+        multi-machines.
+
+        Parameters
+        ----------
+        updater : function
+            the updater function
+
+        Examples
+        --------
+        >>> def update(key, input, stored):
+        ...     print "update on key: %d" % key
+        ...     stored += input * 2
+        >>> kv._set_updater(update)
+        >>> kv.pull(3, out=a)
+        >>> print a.asnumpy()
+        [[ 4.  4.  4.]
+        [ 4.  4.  4.]]
+        >>> kv.push(3, mx.nd.ones(shape))
+        update on key: 3
+        >>> kv.pull(3, out=a)
+        >>> print a.asnumpy()
+        [[ 6.  6.  6.]
+        [ 6.  6.  6.]]
+        """
+        #_updater_proto = ctypes.CFUNCTYPE(
+        #    None, ctypes.c_int, NDArrayHandle, NDArrayHandle, ctypes.c_void_p)
+        _updater_proto = ctypes.CFUNCTYPE(
+            None, ctypes.c_int, NDArrayHandle, NDArrayHandle, ctypes.c_int, ctypes.c_void_p)
+        self._updater_func = _updater_proto(_updater_wrapper(updater))
+        check_call(_LIB.MXKVStoreSetUpdater(self.handle, self._updater_func, None))
+
+
+    def _barrier(self):
+        """Global barrier among all worker nodes
+
+        For example, assume there are n machines, we want to let machine 0 first
+        init the values, and then pull the inited value to all machines. Before
+        pulling, we can place a barrier to guarantee that the initialization is
+        finished.
+        """
+        check_call(_LIB.MXKVStoreBarrier(self.handle))
+
+    def _send_command_to_servers(self, head, body):
+        """Send a command to all server nodes
+
+        Send a command to all server nodes, which will make each server node run
+        KVStoreServer.controller
+
+        This function returns after the command has been executed in all server
+        nodes
+
+        Parameters
+        ----------
+        head : int
+            the head of the command
+        body : str
+            the body of the command
+        """
+        check_call(_LIB.MXKVStoreSendCommmandToServers(
+            self.handle, mx_uint(head), c_str(body)))
+
+def create(name='local'):
+    """Create a new KVStore.
+
+    Parameters
+    ----------
+    name : {'local'}
+        The type of KVStore
+        - local works for multiple devices on a single machine (single process)
+        - dist works for multi-machines (multiple processes)
+    Returns
+    -------
+    kv : KVStore
+        The created KVStore
+    """
+    if not isinstance(name, string_types):
+        raise TypeError('name need to be string')
+    handle = KVStoreHandle()
+    check_call(_LIB.MXKVStoreCreate(c_str(name),
+                                    ctypes.byref(handle)))
+    return KVStore(handle)
