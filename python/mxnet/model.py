@@ -112,4 +112,158 @@ def _update_params(param_arrays, grad_arrays, updater, num_device,
             kvstore.push(index, grad_list, priority=-index)
             # pull back the sum gradients, to the same locations.
             kvstore.pull(index, grad_list, priority=-index)
-        for
+        for k, p in enumerate(zip(arg_list, grad_list)):
+            # faked an index here, to make optimizer create diff
+            # state for the same index but on diff devs, TODO(mli)
+            # use a better solution latter
+            w, g = p
+            updater(index*num_device+k, g, w)
+
+train_accuracy_filename = None
+train_accuracy_file_op = None
+train_accuracy_epoch_filename = None
+train_accuracy_epoch_file_op = None
+train_accuracy_10per_filename = None
+train_accuracy_10per_file_op = None
+train_accuracy_top5_filename=None
+train_accuracy_top5_file_op=None
+train_accuracy_top5_epoch_filename=None
+train_accuracy_top5_epoch_file_op=None
+train_accuracy_10per = 10
+train_interval_batch = 50
+train_accuracy = 0.0
+train_accuracy_top5=0.0
+train_interval_time = 60
+stop_train_record = False
+current_time = 0
+
+val_accuracy_filename = None
+val_accuracy_epoch_filename = None
+val_accuracy_epoch_file_op = None
+val_accuracy_10per_filename = None
+val_accuracy_10per_file_op = None
+val_accuracy_file_op = None
+val_accuracy_top5_filename=None
+val_accuracy_top5_file_op=None
+val_accuracy_top5_epoch_filename=None
+val_accuracy_top5_epoch_file_op=None
+val_accuracy_10per = 10
+val_interval_batch = 50
+val_accuracy = 0.0
+val_accuracy_top5=0.0
+
+def record_accuracy():
+    """to record train accuracy and val accuracy every train_accuracy_interval_time secs(author: yegeyan)"""
+    global train_accuracy_file_op
+    global train_accuracy_epoch_file_op
+    global train_accuracy_10per_file_op
+    global train_accuracy_top5_file_op
+    global train_accuracy_top5_epoch_file_op
+    global train_accuracy
+    global train_accuracy_top5
+    global stop_train_record
+    global current_time
+
+    global val_accuracy_file_op
+    global val_accuracy_epoch_file_op
+    global val_accuracy_10per_file_op
+    global val_accuracy_top5_file_op
+    global val_accuracy_top5_epoch_file_op
+    global val_accuracy_record_time
+    global val_accuracy
+    global val_accuracy_top5
+
+    if stop_train_record:
+        train_accuracy_file_op.write(time.strftime('end time: %Y-%m-%d %H:%M:%S\n',time.localtime(time.time())))
+        train_accuracy_file_op.close()
+        train_accuracy_epoch_file_op.write(time.strftime('end time: %Y-%m-%d %H:%M:%S\n',time.localtime(time.time())))
+        train_accuracy_epoch_file_op.close()
+        train_accuracy_10per_file_op.write(time.strftime('end time: %Y-%m-%d %H:%M:%S\n',time.localtime(time.time())))
+        train_accuracy_10per_file_op.close()
+        train_accuracy_top5_file_op.write(time.strftime('end time: %Y-%m-%d %H:%M:%S\n', time.localtime(time.time())))
+        train_accuracy_top5_file_op.close()
+        train_accuracy_top5_epoch_file_op.write(time.strftime('end time: %Y-%m-%d %H:%M:%S\n', time.localtime(time.time())))
+        train_accuracy_top5_epoch_file_op.close()
+
+        val_accuracy_file_op.write(time.strftime('end time: %Y-%m-%d %H:%M:%S\n',time.localtime(time.time())))
+        val_accuracy_file_op.close()
+        val_accuracy_epoch_file_op.write(time.strftime('end time: %Y-%m-%d %H:%M:%S\n',time.localtime(time.time())))
+        val_accuracy_epoch_file_op.close()
+        val_accuracy_10per_file_op.write(time.strftime('end time: %Y-%m-%d %H:%M:%S\n',time.localtime(time.time())))
+        val_accuracy_10per_file_op.close()
+        val_accuracy_top5_file_op.write(time.strftime('end time: %Y-%m-%d %H:%M:%S\n', time.localtime(time.time())))
+        val_accuracy_top5_file_op.close()
+        val_accuracy_top5_epoch_file_op.write(time.strftime('end time: %Y-%m-%d %H:%M:%S\n', time.localtime(time.time())))
+        val_accuracy_top5_epoch_file_op.close()
+        return
+
+    if not math.isnan(train_accuracy):
+        train_accuracy_file_op.write("%f\n" % train_accuracy)
+        train_accuracy_file_op.flush()
+    if not math.isnan(val_accuracy):
+        val_accuracy_file_op.write("%f\n" % val_accuracy)
+        val_accuracy_file_op.flush()
+    if not math.isnan(train_accuracy_top5):
+        train_accuracy_top5_file_op.write("%f\n" % train_accuracy_top5)
+        train_accuracy_top5_file_op.flush()
+    if not math.isnan(val_accuracy_top5):
+        val_accuracy_top5_file_op.write("%f\n" % val_accuracy_top5)
+        val_accuracy_top5_file_op.flush()
+    current_time += train_interval_time
+    t = threading.Timer(train_interval_time, record_accuracy)
+    t.start()
+
+max_stale = 0
+min_iters = '0'
+miniters_filename = None
+miniters_file_op = None
+
+is_straggler = False 
+
+def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
+                        arg_params, aux_params,
+                        begin_epoch, end_epoch, epoch_size, optimizer,
+                        kvstore, update_on_kvstore,
+                        train_data, eval_data=None, eval_metric=None, val_eval_metric=None,
+                        epoch_end_callback=None, batch_end_callback=None,
+                        logger=None, work_load_list=None, monitor=None,
+                        eval_batch_end_callback=None, sym_gen=None):
+    """Internal training function on multiple devices.
+    This function will also work for single device as well.
+    Parameters
+    ----------
+    symbol : Symbol
+        The network configuration
+    ctx : list of Context
+        The training devices.
+    arg_names: list of str
+        Name of all arguments of the network.
+    param_names: list of str
+        Name of all trainable parameters of the network.
+    aux_names: list of str
+        Name of all auxiliary states of the network.
+    arg_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's weights.
+    aux_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's auxiliary states.
+    begin_epoch : int
+        The begining training epoch.
+    end_epoch : int
+        The end training epoch.
+    epoch_size : int, optional
+        Number of batches in a epoch. In default, it is set to
+        ceil(num_train_examples / batch_size)
+    optimizer : Optimizer
+        The optimization algorithm
+    train_data : DataIter
+        Training data iterator.
+    eval_data : DataIter
+        Validation data iterator.
+    eval_metric : EvalMetric
+        An evaluation function or a list of evaluation functions.
+    epoch_end_callback : callable(epoch, symbol, arg_params, aux_states)
+        A callback that is invoked at end of each epoch.
+        This can be used to checkpoint model each epoch.
+    batch_end_callback : callable(BatchEndParams)
+        A callback that is invoked at end of each batch.
+        This can be used to measur
