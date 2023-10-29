@@ -266,4 +266,164 @@ def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
         This can be used to checkpoint model each epoch.
     batch_end_callback : callable(BatchEndParams)
         A callback that is invoked at end of each batch.
-        This can be used to measur
+        This can be used to measure speed, get result from evaluation metric. etc.
+    kvstore : KVStore
+        The KVStore
+    update_on_kvstore : bool
+        whether or not perform weight updating on kvstore
+    logger : logging logger
+        When not specified, default logger will be used.
+    work_load_list : list of float or int, optional
+        The list of work load for different devices,
+        in the same order as ctx
+    monitor : Monitor, optional
+        Monitor installed to executor,
+        for monitoring outputs, weights, and gradients for debugging.
+    Notes
+    -----
+    - This function will inplace update the NDArrays in arg_params and aux_states.
+    """
+    global train_accuracy_epoch_filename
+    global train_accuracy_epoch_file_op
+    global train_accuracy_10per_filename
+    global train_accuracy_10per_file_op
+    global train_accuracy_top5_filename
+    global train_accuracy_top5_file_op
+    global train_accuracy_top5_epoch_filename
+    global train_accuracy_top5_epoch_file_op
+    global train_accuracy
+    global train_accuracy_10per
+    global train_accuracy_top5
+    global stop_train_record
+    global is_straggler
+    global current_time
+
+    global val_accuracy_epoch_filename
+    global val_accuracy_epoch_file_op
+    global val_accuracy_10per_filename
+    global val_accuracy_10per_file_op
+    global val_accuracy_top5_filename
+    global val_accuracy_top5_file_op
+    global val_accuracy_top5_epoch_filename
+    global val_accuracy_top5_epoch_file_op
+    global val_accuracy
+    global val_accuracy_10per
+    global val_accuracy_top5
+
+    global max_stale
+    global min_iters
+    global miniters_filename
+    global miniters_file_op
+
+    if logger is None:
+        logger = logging
+    executor_manager = DataParallelExecutorManager(symbol=symbol,
+                                                   sym_gen=sym_gen,
+                                                   ctx=ctx,
+                                                   train_data=train_data,
+                                                   param_names=param_names,
+                                                   arg_names=arg_names,
+                                                   aux_names=aux_names,
+                                                   work_load_list=work_load_list,
+                                                   logger=logger)
+
+    if monitor:
+        executor_manager.install_monitor(monitor)
+
+    executor_manager.set_params(arg_params, aux_params)
+
+    if not update_on_kvstore:
+        updater = get_updater(optimizer)
+
+    if kvstore:
+        _initialize_kvstore(kvstore=kvstore,
+                            param_arrays=executor_manager.param_arrays,
+                            arg_params=arg_params,
+                            param_names=executor_manager.param_names,
+                            update_on_kvstore=update_on_kvstore)
+
+    if update_on_kvstore:
+        kvstore.set_optimizer(optimizer)
+
+    # Now start training
+    train_data.reset()
+    total_batch = 0
+    for epoch in range(begin_epoch, end_epoch):
+        # Training phase
+        tic = time.time()
+        eval_metric.reset()
+        val_eval_metric.reset() #yegeyan 2017.1.4
+        nbatch = 0
+        # Iterate over training data.
+        while True:
+            do_reset = True
+            for data_batch in train_data:
+                if kvstore.type == "dist_ssync" and not is_straggler:
+                    wait_time = 0.0
+                    while (not min_iters.isdigit()) or (min_iters.isdigit() and total_batch - int(min_iters) >= max_stale):
+                        time.sleep(0.01)
+                        miniters_file_op = open(miniters_filename, "r")
+                        min_iters = miniters_file_op.read()
+                        miniters_file_op.close()
+                        wait_time += 0.01
+                        if (abs(wait_time - 10.0) <= 1):
+                            break
+
+                executor_manager.load_data_batch(data_batch)
+
+                if monitor is not None:
+                    monitor.tic()
+
+                executor_manager.forward(is_train=True)
+                executor_manager.backward()
+
+                if update_on_kvstore:
+                    _update_params_on_kvstore(executor_manager.param_arrays,
+                                              executor_manager.grad_arrays,
+                                              kvstore)
+                else:
+                    _update_params(executor_manager.param_arrays,
+                                   executor_manager.grad_arrays,
+                                   updater=updater,
+                                   num_device=len(ctx),
+                                   kvstore=kvstore)
+
+                if monitor is not None:
+                    monitor.toc_print()
+
+                # evaluate at end, so we can lazy copy
+                executor_manager.update_metric(eval_metric, data_batch.label)
+
+                nbatch += 1
+                total_batch += 1
+                if nbatch % train_interval_batch == 0:
+                    train_accuracy = eval_metric.get()[1][0]
+                    train_accuracy_top5=eval_metric.get()[1][1]
+                    if train_accuracy * 100 >= train_accuracy_10per:
+                        train_accuracy_10per_file_op.write(time.strftime('%H:%M:%S',time.localtime(time.time())))
+                        train_accuracy_10per_file_op.write("   %f\n" % train_accuracy)
+                        train_accuracy_10per_file_op.flush()
+                        train_accuracy_10per = train_accuracy * 100 / 10 * 10 + 10
+
+                if total_batch % val_interval_batch == 0:
+                    val_eval_metric.reset()
+                    eval_data.reset()
+
+                    for i, eval_batch in enumerate(eval_data):
+                        executor_manager.load_data_batch(eval_batch)
+                        executor_manager.forward(is_train=False)
+                        executor_manager.update_metric(val_eval_metric, eval_batch.label)
+
+                    name_value = val_eval_metric.get_name_value()
+
+                    for name, value in name_value:
+                        if name =='accuracy':
+                            val_accuracy = value;
+                            if value * 100 > val_accuracy_10per:
+                                val_accuracy_10per_file_op.write(time.strftime('%H:%M:%S',time.localtime(time.time())))
+                                val_accuracy_10per_file_op.write("   %f\n" % value)
+                                val_accuracy_10per_file_op.flush()
+                                val_accuracy_10per = value * 100 / 10 * 10 + 10
+                        if name=='top_k_accuracy_5':
+                            val_accuracy_top5=value
+                   
