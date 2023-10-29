@@ -426,4 +426,171 @@ def _train_multi_device(symbol, ctx, arg_names, param_names, aux_names,
                                 val_accuracy_10per = value * 100 / 10 * 10 + 10
                         if name=='top_k_accuracy_5':
                             val_accuracy_top5=value
-                   
+                    eval_data.reset()
+
+                # batch callback (for print purpose)
+                if batch_end_callback != None:
+                    batch_end_params = BatchEndParam(epoch=epoch,
+                                                     nbatch=nbatch,
+                                                     eval_metric=eval_metric,
+                                                     locals=locals())
+                    if isinstance(batch_end_callback, list):
+                        for call in batch_end_callback:
+                            call(batch_end_params)
+                    else:
+                        batch_end_callback(batch_end_params)
+
+                # this epoch is done possibly earlier
+                if epoch_size is not None and nbatch >= epoch_size:
+                    do_reset = False
+                    break
+
+            if do_reset:
+                logger.info('Epoch[%d] Resetting Data Iterator', epoch)
+                train_data.reset()
+
+            # this epoch is done
+            if epoch_size is None or nbatch >= epoch_size:
+                break
+
+        toc = time.time()
+        logger.info('Epoch[%d] Time cost=%.3f', epoch, (toc - tic))
+
+        if epoch_end_callback or epoch + 1 == end_epoch:
+            executor_manager.copy_to(arg_params, aux_params)
+
+        if epoch_end_callback != None:
+            if isinstance(epoch_end_callback, list):
+                for call in epoch_end_callback:
+                    call(epoch, symbol, arg_params, aux_params)
+            else:
+                epoch_end_callback(epoch, symbol, arg_params, aux_params)
+
+        # evaluation
+        if eval_data:
+            train_accuracy = eval_metric.get()[1][0]
+            train_accuracy_top5=eval_metric.get()[1][1]
+            eval_metric.reset()
+            eval_data.reset()
+            for i, eval_batch in enumerate(eval_data):
+                executor_manager.load_data_batch(eval_batch)
+                executor_manager.forward(is_train=False)
+                executor_manager.update_metric(eval_metric, eval_batch.label)
+                if eval_batch_end_callback != None:
+                    batch_end_params = BatchEndParam(epoch=epoch,
+                                                     nbatch=i,
+                                                     eval_metric=eval_metric,
+                                                     locals=locals())
+                    if isinstance(eval_batch_end_callback, list):
+                        for call in eval_batch_end_callback:
+                            call(batch_end_params)
+                    else:
+                        eval_batch_end_callback(batch_end_params)
+            name_value = eval_metric.get_name_value()
+            for name, value in name_value:
+                logger.info('Epoch[%d] Validation-%s=%f', epoch, name, value)
+                if name == 'accuracy':
+                    val_accuracy_epoch_file_op.write("%f  " % current_time)
+                    val_accuracy_epoch_file_op.write("%f\n" % value)
+                    val_accuracy_epoch_file_op.flush()
+                if name == 'top_k_accuracy_5':
+                    val_accuracy_top5_epoch_file_op.write("%f  " % current_time)
+                    val_accuracy_top5_epoch_file_op.write("%f\n" % value)
+                    val_accuracy_top5_epoch_file_op.flush()
+            eval_data.reset()
+            
+            train_accuracy_epoch_file_op.write("%f\n" % train_accuracy)
+            train_accuracy_epoch_file_op.flush()
+            train_accuracy_top5_epoch_file_op.write("%f\n" % train_accuracy_top5)
+            train_accuracy_top5_epoch_file_op.flush()
+    # end of all epochs
+    stop_train_record = True 
+    return
+
+
+def save_checkpoint(prefix, epoch, symbol, arg_params, aux_params):
+    """Checkpoint the model data into file.
+
+    Parameters
+    ----------
+    prefix : str
+        Prefix of model name.
+    epoch : int
+        The epoch number of the model.
+    symbol : Symbol
+        The input symbol
+    arg_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's weights.
+    aux_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's auxiliary states.
+    Notes
+    -----
+    - ``prefix-symbol.json`` will be saved for symbol.
+    - ``prefix-epoch.params`` will be saved for parameters.
+    """
+    symbol.save('%s-symbol.json' % prefix)
+    save_dict = {('arg:%s' % k) : v for k, v in arg_params.items()}
+    save_dict.update({('aux:%s' % k) : v for k, v in aux_params.items()})
+    param_name = '%s-%04d.params' % (prefix, epoch)
+    nd.save(param_name, save_dict)
+    logging.info('Saved checkpoint to \"%s\"', param_name)
+
+
+def load_checkpoint(prefix, epoch):
+    """Load model checkpoint from file.
+
+    Parameters
+    ----------
+    prefix : str
+        Prefix of model name.
+    epoch : int
+        Epoch number of model we would like to load.
+
+    Returns
+    -------
+    symbol : Symbol
+        The symbol configuration of computation network.
+    arg_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's weights.
+    aux_params : dict of str to NDArray
+        Model parameter, dict of name to NDArray of net's auxiliary states.
+
+    Notes
+    -----
+    - symbol will be loaded from ``prefix-symbol.json``.
+    - parameters will be loaded from ``prefix-epoch.params``.
+    """
+    symbol = sym.load('%s-symbol.json' % prefix)
+    save_dict = nd.load('%s-%04d.params' % (prefix, epoch))
+    arg_params = {}
+    aux_params = {}
+    for k, v in save_dict.items():
+        tp, name = k.split(':', 1)
+        if tp == 'arg':
+            arg_params[name] = v
+        if tp == 'aux':
+            aux_params[name] = v
+    return (symbol, arg_params, aux_params)
+
+
+class FeedForward(BASE_ESTIMATOR):
+    """Model class of MXNet for training and predicting feedforward nets.
+    This class is designed for a single-data single output supervised network.
+
+    Parameters
+    ----------
+    symbol : Symbol
+        The symbol configuration of computation network.
+    ctx : Context or list of Context, optional
+        The device context of training and prediction.
+        To use multi GPU training, pass in a list of gpu contexts.
+    num_epoch : int, optional
+        Training parameter, number of training epochs(epochs).
+    epoch_size : int, optional
+        Number of batches in a epoch. In default, it is set to
+        ceil(num_train_examples / batch_size)
+    optimizer : str or Optimizer, optional
+        Training parameter, name or optimizer object for training.
+    initializer : initializer function, optional
+        Training parameter, the initialization scheme used.
+    numpy_batch_size : int, op
