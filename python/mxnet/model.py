@@ -919,4 +919,88 @@ class FeedForward(BASE_ESTIMATOR):
             For print purpose
         kvstore: KVStore or str, optional
            The KVStore or a string kvstore type: 'local', 'dist_sync', 'dist_async'
-  
+           In default uses 'local', often no need to change for single machiine.
+        logger : logging logger, optional
+            When not specified, default logger will be used.
+        work_load_list : float or int, optional
+            The list of work load for different devices,
+            in the same order as ctx
+
+        Note
+        ----
+        KVStore behavior
+        - 'local', multi-devices on a single machine, will automatically choose best type.
+        - 'dist_sync', multi-machines with BSP
+        - 'dist_async', multi-machines with partical asynchronous
+        """
+        global train_accuracy_filename
+        global train_accuracy_epoch_filename
+        global train_accuracy_10per_filename
+        global train_accuracy_top5_filename
+        global train_accuracy_top5_epoch_filename
+        global train_accuracy_file_op
+        global train_accuracy_epoch_file_op
+        global train_accuracy_10per_file_op
+        global train_accuracy_top5_file_op
+        global train_accuracy_top5_epoch_file_op
+        global train_interval_batch
+        global train_interval_time
+        global is_straggler
+
+        global val_accuracy_filename
+        global val_accuracy_epoch_filename
+        global val_accuracy_10per_filename
+        global val_accuracy_top5_filename
+        global val_accuracy_top5_epoch_filename
+        global val_accuracy_file_op
+        global val_accuracy_epoch_file_op
+        global val_accuracy_10per_file_op
+        global val_accuracy_top5_file_op
+        global val_accuracy_top5_epoch_file_op
+        global val_interval_batch
+
+        global miniters_filename
+        global miniters_file_op
+        global min_iters
+        global max_stale
+
+        user = getpass.getuser()
+        if hostname == "node16":
+            is_straggler = True
+
+        if dataset == "mnist":
+            train_accuracy_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/mnist/mnist_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/mnist/mnist_epoch_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_10per_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/mnist/mnist_10per_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_top5_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/mnist/mnist_top5_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_top5_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/mnist/mnist_top5_epoch_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/mnist/mnist_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/mnist/mnist_epoch_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_10per_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/mnist/mnist_10per_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_top5_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/mnist/mnist_top5_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_top5_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/mnist/mnist_top5_epoch_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_interval_time = 10
+            train_interval_batch = 50
+            val_interval_batch = 50
+        if dataset == "cifar10":
+            train_accuracy_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar10/cifar10_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar10/cifar10_epoch_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_10per_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar10/cifar10_10per_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_top5_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar10/cifar10_top5_accuracy_cluster" + \
+                                            hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_top5_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar10/cifar10_top5_epoch_accuracy_cluster" + \
+                                            hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar10/cifar10_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar10/cifar10_epoch_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_10per_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar10/cifar10_10per_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_top5_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar10/cifar10_top5_val_accuracy_cluster" + \
+                                          hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_top5_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar10/cifar10_top5_epoch_val_accuracy_cluster" + \
+                                          hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_interval_time = 60
+            train_interval_batch = 100
+            val_interval_batch = 200
+        if dataset == "cifar100":
+            train_accuracy_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_epoch_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_10per_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cif
