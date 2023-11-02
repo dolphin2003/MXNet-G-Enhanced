@@ -1003,4 +1003,93 @@ class FeedForward(BASE_ESTIMATOR):
         if dataset == "cifar100":
             train_accuracy_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
             train_accuracy_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_epoch_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
-            train_accuracy_10per_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cif
+            train_accuracy_10per_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_10per_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_top5_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_top5_accuracy_cluster" + \
+                                            hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_top5_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_top5_epoch_accuracy_cluster" + \
+                                            hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_epoch_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_10per_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_10per_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_top5_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_top5_val_accuracy_cluster" + \
+                                          hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_top5_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/cifar100/cifar100_top5_epoch_val_accuracy_cluster" + \
+                                          hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_interval_time = 60
+            train_interval_batch = 100
+            val_interval_batch = 200
+        if dataset == "imagenet":
+            train_accuracy_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/imagenet/imagenet_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/imagenet/imagenet_epoch_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_10per_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/imagenet/imagenet_10per_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_top5_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/imagenet/imagenet_top5_accuracy_cluster" + \
+                                            hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_accuracy_top5_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/imagenet/imagenet_top5_epoch_accuracy_cluster" + \
+                                            hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/imagenet/imagenet_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/imagenet/imagenet_epoch_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_10per_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/imagenet/imagenet_10per_val_accuracy_cluster" + hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_top5_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/imagenet/imagenet_top5_val_accuracy_cluster" + \
+                                          hostname + "_worker" + str(kvstore.rank) + ".log"
+            val_accuracy_top5_epoch_filename = "/home/"+user+"/MXNet-G/example/image-classification/log/imagenet/imagenet_top5_epoch_val_accuracy_cluster" + \
+                                          hostname + "_worker" + str(kvstore.rank) + ".log"
+            train_interval_time = 600
+            train_interval_batch = 1250
+            val_interval_batch = 1250
+                
+        train_accuracy_file_op = open(train_accuracy_filename, "a")
+        train_accuracy_epoch_file_op = open(train_accuracy_epoch_filename, "a")
+        train_accuracy_10per_file_op = open(train_accuracy_10per_filename, "a")
+        train_accuracy_top5_file_op = open(train_accuracy_top5_filename, "a")
+        train_accuracy_top5_epoch_file_op = open(train_accuracy_top5_epoch_filename, "a")
+        val_accuracy_file_op = open(val_accuracy_filename, "a")
+        val_accuracy_epoch_file_op = open(val_accuracy_epoch_filename, "a")
+        val_accuracy_10per_file_op = open(val_accuracy_10per_filename, "a")
+        val_accuracy_top5_file_op = open(val_accuracy_top5_filename, "a")
+        val_accuracy_top5_epoch_file_op = open(val_accuracy_top5_epoch_filename, "a")
+
+        if kvstore.type == "dist_ssync":
+            max_stale = staleness
+            miniters_filename = "/home/"+user+"/MXNet-G/example/image-classification/ssp/miniters.log"
+            miniters_file_op = open(miniters_filename, "w+")
+            miniters_file_op.write("%d" % int(min_iters))
+            miniters_file_op.close()
+
+        data = self._init_iter(X, y, is_train=True)
+        eval_data = self._init_eval_iter(eval_data)
+
+        if self.sym_gen:
+            self.symbol = self.sym_gen(data.default_bucket_key) # pylint: disable=no-member
+            self._check_arguments()
+        self.kwargs["sym"] = self.symbol
+
+        arg_names, param_names, aux_names = \
+                self._init_params(dict(data.provide_data+data.provide_label))
+
+        # setup metric
+        if not isinstance(eval_metric, metric.EvalMetric):
+            eval_metric = metric.create(eval_metric)
+
+        # setup val metric
+        if not isinstance(val_eval_metric, metric.EvalMetric):
+            val_eval_metric = metric.create(val_eval_metric)
+
+        # create kvstore
+        (kvstore, update_on_kvstore) = _create_kvstore(
+            kvstore, len(self.ctx), self.arg_params)
+
+        param_idx2name = {}
+        if update_on_kvstore:
+            param_idx2name.update(enumerate(param_names))
+        else:
+            for i, n in enumerate(param_names):
+                for k in range(len(self.ctx)):
+                    param_idx2name[i*len(self.ctx)+k] = n
+        self.kwargs["param_idx2name"] = param_idx2name
+
+        def getIp(ethname):
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0X8915, struct.pack('256s', ethname[:15]))[20:24])
+        
+        def getWorkerNumInGroup(ip):
+       
