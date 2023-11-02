@@ -1092,4 +1092,76 @@ class FeedForward(BASE_ESTIMATOR):
             return socket.inet_ntoa(fcntl.ioctl(s.fileno(), 0X8915, struct.pack('256s', ethname[:15]))[20:24])
         
         def getWorkerNumInGroup(ip):
-       
+            fr = open("/home/"+user+"/MXNet-G/example/image-classification/groups")
+            for line in fr.readlines():
+                lineArr = line.strip().split()
+                if ip in lineArr:
+                    return len(lineArr)
+            print("Not found this ip:{}".format(ip))
+            return 0
+
+        # init optmizer
+        if isinstance(self.optimizer, str):
+            batch_size = data.batch_size
+            optimizer = opt.create(self.optimizer,
+                                   rescale_grad=(batch_size),
+                                   **(self.kwargs))
+        elif isinstance(self.optimizer, opt.Optimizer):
+            optimizer = self.optimizer
+
+        if kvstore:
+            train_accuracy_file_op.write("\n________________%s  %s________________\n" % (network_name,kvstore.type))
+            train_accuracy_epoch_file_op.write("\n________________%s  %s________________\n" % (network_name,kvstore.type))
+            train_accuracy_10per_file_op.write("\n________________%s  %s________________\n" % (network_name,kvstore.type))
+            train_accuracy_top5_file_op.write("\n________________%s  %s________________\n" % (network_name,kvstore.type))
+            train_accuracy_top5_epoch_file_op.write("\n________________%s  %s________________\n" % (network_name,kvstore.type))
+            val_accuracy_file_op.write("\n________________%s  %s________________\n" % (network_name,kvstore.type))
+            val_accuracy_epoch_file_op.write("\n________________%s  %s________________\n" % (network_name,kvstore.type))
+            val_accuracy_10per_file_op.write("\n________________%s  %s________________\n" % (network_name,kvstore.type))
+            val_accuracy_top5_file_op.write("\n________________%s  %s________________\n" % (network_name,kvstore.type))
+            val_accuracy_top5_epoch_file_op.write("\n________________%s  %s________________\n" % (network_name,kvstore.type))
+        else:
+            train_accuracy_file_op.write("\n________________%s  None________________\n" % network_name)
+            train_accuracy_epoch_file_op.write("\n________________%s  None________________\n" % network_name)
+            train_accuracy_10per_file_op.write("\n________________%s  None________________\n" % network_name)
+            train_accuracy_top5_file_op.write("\n________________%s  None________________\n" % network_name)
+            train_accuracy_top5_epoch_file_op.write("\n________________%s  None________________\n" % network_name)
+            val_accuracy_file_op.write("\n________________%s  None________________\n" % network_name)
+            val_accuracy_epoch_file_op.write("\n________________%s  None________________\n" % network_name)
+            val_accuracy_10per_file_op.write("\n________________%s  None________________\n" % network_name)
+            val_accuracy_top5_file_op.write("\n________________%s  None________________\n" % network_name)
+            val_accuracy_top5_epoch_file_op.write("\n________________%s  None________________\n" % network_name)
+            
+        train_accuracy_file_op.write("worker_num=%s batch_size=%s lr=%s epoch_num=%s interval_time=%ssec \n" % (kvstore.num_workers,batch_size,lr,self.num_epoch,train_interval_time))
+        train_accuracy_epoch_file_op.write("worker_num=%s batch_size=%s lr=%s epoch_num=%s interval_time=%ssec \n" % (kvstore.num_workers,batch_size,lr,self.num_epoch,train_interval_time))
+        train_accuracy_10per_file_op.write("worker_num=%s batch_size=%s lr=%s epoch_num=%s interval_time=%ssec \n" % (kvstore.num_workers,batch_size,lr,self.num_epoch,train_interval_time))
+        train_accuracy_top5_file_op.write("worker_num=%s batch_size=%s lr=%s epoch_num=%s interval_time=%ssec \n" % (kvstore.num_workers,batch_size,lr,self.num_epoch,train_interval_time))
+        train_accuracy_top5_epoch_file_op.write("worker_num=%s batch_size=%s lr=%s epoch_num=%s interval_time=%ssec \n" % (kvstore.num_workers,batch_size,lr,self.num_epoch,train_interval_time))
+        val_accuracy_file_op.write("worker_num=%s batch_size=%s lr=%s epoch_num=%s interval_time=%ssec \n" % (kvstore.num_workers,batch_size,lr,self.num_epoch,train_interval_time))
+        val_accuracy_epoch_file_op.write("worker_num=%s batch_size=%s lr=%s epoch_num=%s interval_time=%ssec \n" % (kvstore.num_workers,batch_size,lr,self.num_epoch,train_interval_time))
+        val_accuracy_10per_file_op.write("worker_num=%s batch_size=%s lr=%s epoch_num=%s interval_time=%ssec \n" % (kvstore.num_workers,batch_size,lr,self.num_epoch,train_interval_time))
+        val_accuracy_top5_file_op.write("worker_num=%s batch_size=%s lr=%s epoch_num=%s interval_time=%ssec \n" % (kvstore.num_workers,batch_size,lr,self.num_epoch,train_interval_time))
+        val_accuracy_top5_epoch_file_op.write("worker_num=%s batch_size=%s lr=%s epoch_num=%s interval_time=%ssec \n" % (kvstore.num_workers,batch_size,lr,self.num_epoch,train_interval_time))
+            
+        train_accuracy_file_op.write(time.strftime('begin time: %Y-%m-%d %H:%M:%S\n',time.localtime(time.time())))
+        train_accuracy_epoch_file_op.write(time.strftime('begin time: %Y-%m-%d %H:%M:%S\n',time.localtime(time.time())))
+        train_accuracy_10per_file_op.write(time.strftime('begin time: %Y-%m-%d %H:%M:%S\n',time.localtime(time.time())))
+        train_accuracy_top5_file_op.write(time.strftime('begin time: %Y-%m-%d %H:%M:%S\n', time.localtime(time.time())))
+        train_accuracy_top5_epoch_file_op.write(time.strftime('begin time: %Y-%m-%d %H:%M:%S\n', time.localtime(time.time())))
+        val_accuracy_file_op.write(time.strftime('begin time: %Y-%m-%d %H:%M:%S\n', time.localtime(time.time())))
+        val_accuracy_epoch_file_op.write(time.strftime('begin time: %Y-%m-%d %H:%M:%S\n', time.localtime(time.time())))
+        val_accuracy_10per_file_op.write(time.strftime('begin time: %Y-%m-%d %H:%M:%S\n', time.localtime(time.time())))
+        val_accuracy_top5_file_op.write(time.strftime('begin time: %Y-%m-%d %H:%M:%S\n', time.localtime(time.time())))
+        val_accuracy_top5_epoch_file_op.write(time.strftime('begin time: %Y-%m-%d %H:%M:%S\n', time.localtime(time.time())))
+
+        # to record accuracy
+        record_accuracy()
+        # do training
+        _train_multi_device(self.symbol, self.ctx, arg_names, param_names, aux_names,
+                            self.arg_params, self.aux_params,
+                            begin_epoch=self.begin_epoch, end_epoch=self.num_epoch,
+                            epoch_size=self.epoch_size,
+                            optimizer=optimizer,
+                            train_data=data, eval_data=eval_data,
+                            eval_metric=eval_metric, val_eval_metric=val_eval_metric,
+                           
