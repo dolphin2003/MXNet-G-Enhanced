@@ -301,4 +301,32 @@ class PythonLossModule(PythonModule):
     def _backward_impl(self):
         """Actual implementation of the backward computation. The computation
         should take `self._scores` and `self._labels` and then compute the
-   
+        gradients with respect to the scores, store it as an `NDArray` in
+        `self._scores_grad`.
+
+        Instead of defining a subclass and overriding this function,
+        a more convenient way is to pass in a `grad_func` when constructing
+        the module object. Then it will be called to compute the gradients.
+        """
+        if self._grad_func is not None:
+            grad = self._grad_func(self._scores, self._labels)
+            if not isinstance(grad, nd.NDArray):
+                grad = nd.array(grad)
+            self._scores_grad = grad
+        else:
+            raise NotImplementedError()
+
+    def get_input_grads(self, merge_multi_context=True):
+        """Get the gradients to the inputs, computed in the previous backward computation.
+
+        Parameters
+        ----------
+        merge_multi_context : bool
+            Should always be `True` because we do not use multiple context for computation.
+        """
+        assert merge_multi_context is True
+        return [self._scores_grad]
+
+    def install_monitor(self, mon):
+        """Install monitor on all executors"""
+        raise NotImplementedError()
