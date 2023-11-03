@@ -1164,4 +1164,126 @@ class FeedForward(BASE_ESTIMATOR):
                             optimizer=optimizer,
                             train_data=data, eval_data=eval_data,
                             eval_metric=eval_metric, val_eval_metric=val_eval_metric,
-                           
+                            epoch_end_callback=epoch_end_callback,
+                            batch_end_callback=batch_end_callback,
+                            kvstore=kvstore, update_on_kvstore=update_on_kvstore,
+                            logger=logger, work_load_list=work_load_list, monitor=monitor,
+                            eval_batch_end_callback=eval_batch_end_callback,
+                            sym_gen=self.sym_gen)
+
+    def save(self, prefix, epoch=None):
+        """Checkpoint the model checkpoint into file.
+        You can also use pickle to do the job if you only work on python.
+        The advantage of load/save is the file is language agnostic.
+        This means the file saved using save can be loaded by other language binding of mxnet.
+        You also get the benefit being able to directly load/save from cloud storage(S3, HDFS)
+
+        Parameters
+        ----------
+        prefix : str
+            Prefix of model name.
+
+        Notes
+        -----
+        - ``prefix-symbol.json`` will be saved for symbol.
+        - ``prefix-epoch.params`` will be saved for parameters.
+        """
+        if epoch is None:
+            epoch = self.num_epoch
+        assert epoch is not None
+        save_checkpoint(prefix, epoch, self.symbol, self.arg_params, self.aux_params)
+
+    @staticmethod
+    def load(prefix, epoch, ctx=None, **kwargs):
+        """Load model checkpoint from file.
+
+        Parameters
+        ----------
+        prefix : str
+            Prefix of model name.
+        epoch : int
+            epoch number of model we would like to load.
+        ctx : Context or list of Context, optional
+            The device context of training and prediction.
+        kwargs : dict
+            other parameters for model, including num_epoch, optimizer and numpy_batch_size
+
+        Returns
+        -------
+        model : FeedForward
+            The loaded model that can be used for prediction.
+
+        Notes
+        -----
+        - ``prefix-symbol.json`` will be saved for symbol.
+        - ``prefix-epoch.params`` will be saved for parameters.
+        """
+        symbol, arg_params, aux_params = load_checkpoint(prefix, epoch)
+        return FeedForward(symbol, ctx=ctx,
+                           arg_params=arg_params, aux_params=aux_params,
+                           begin_epoch=epoch,
+                           **kwargs)
+
+    @staticmethod
+    def create(symbol, X, y=None, ctx=None,
+               num_epoch=None, epoch_size=None, optimizer='sgd', initializer=Uniform(0.01),
+               eval_data=None, eval_metric='acc',
+               epoch_end_callback=None, batch_end_callback=None,
+               kvstore='local', logger=None, work_load_list=None,
+               eval_batch_end_callback=None, **kwargs):
+        """Functional style to create a model.
+        This function will be more consistent with functional
+        languages such as R, where mutation is not allowed.
+
+        Parameters
+        ----------
+        symbol : Symbol
+            The symbol configuration of computation network.
+        X : DataIter
+            Training data
+        y : numpy.ndarray, optional
+            If X is numpy.ndarray y is required to set
+        ctx : Context or list of Context, optional
+            The device context of training and prediction.
+            To use multi GPU training, pass in a list of gpu contexts.
+        num_epoch : int, optional
+            Training parameter, number of training epochs(epochs).
+        epoch_size : int, optional
+            Number of batches in a epoch. In default, it is set to
+            ceil(num_train_examples / batch_size)
+        optimizer : str or Optimizer, optional
+            Training parameter, name or optimizer object for training.
+        initializier : initializer function, optional
+            Training parameter, the initialization scheme used.
+        eval_data : DataIter or numpy.ndarray pair
+            If eval_set is numpy.ndarray pair, it should be (valid_data, valid_label)
+        eval_metric : metric.EvalMetric or str or callable
+            The evaluation metric, name of evaluation metric.
+            Or a customize evaluation function that returns the statistics
+            based on minibatch.
+        epoch_end_callback : callable(epoch, symbol, arg_params, aux_states)
+            A callback that is invoked at end of each epoch.
+            This can be used to checkpoint model each epoch.
+        batch_end_callback: callable(epoch)
+            A callback that is invoked at end of each batch
+            For print purpose
+        kvstore: KVStore or str, optional
+           The KVStore or a string kvstore type: 'local', 'dist_sync', 'dis_async'
+           In default uses 'local', often no need to change for single machiine.
+        logger : logging logger, optional
+            When not specified, default logger will be used.
+        work_load_list : list of float or int, optional
+            The list of work load for different devices,
+            in the same order as ctx
+        """
+        model = FeedForward(symbol, ctx=ctx, num_epoch=num_epoch,
+                            epoch_size=epoch_size,
+                            optimizer=optimizer, initializer=initializer, **kwargs)
+        model.fit(X, y, eval_data=eval_data, eval_metric=eval_metric,
+                  epoch_end_callback=epoch_end_callback,
+                  batch_end_callback=batch_end_callback,
+                  kvstore=kvstore,
+                  logger=logger,
+                  work_load_list=work_load_list,
+                  eval_batch_end_callback=eval_batch_end_callback)
+        return model
