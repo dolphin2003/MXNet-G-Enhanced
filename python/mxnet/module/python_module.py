@@ -138,4 +138,167 @@ class PythonModule(BaseModule):
     ################################################################################
     # module setup
     ################################################################################
-    def bind(self, data_shapes, label_shapes=N
+    def bind(self, data_shapes, label_shapes=None, for_training=True,
+             inputs_need_grad=False, force_rebind=False, shared_module=None):
+        """Bind the symbols to construct executors. This is necessary before one
+        can perform computation with the module.
+
+        Parameters
+        ----------
+        data_shapes : list of (str, tuple)
+            Typically is `data_iter.provide_data`.
+        label_shapes : list of (str, tuple)
+            Typically is `data_iter.provide_label`.
+        for_training : bool
+            Default is `True`. Whether the executors should be bind for training.
+        inputs_need_grad : bool
+            Default is `False`. Whether the gradients to the input data need to be computed.
+            Typically this is not needed. But this might be needed when implementing composition
+            of modules.
+        force_rebind : bool
+            Default is `False`. This function does nothing if the executors are already
+            binded. But with this `True`, the executors will be forced to rebind.
+        shared_module : Module
+            Default is `None`. This is used in bucketing. When not `None`, the shared module
+            essentially corresponds to a different bucket -- a module with different symbol
+            but with the same sets of parameters (e.g. unrolled RNNs with different lengths).
+        """
+        if self.binded and not force_rebind:
+            self.logger.warning('Already binded, ignoring bind()')
+            return
+
+        self.for_training = for_training
+        self.inputs_need_grad = inputs_need_grad
+
+        assert len(data_shapes) == len(self._data_names)
+        assert [x[0] for x in data_shapes] == self._data_names
+        self._data_shapes = data_shapes
+
+        self._label_shapes = label_shapes
+        if label_shapes is not None:
+            assert self._label_names is not None
+            assert len(self._label_names) == len(label_shapes)
+            assert [x[0] for x in label_shapes] == self._label_names
+
+        self._output_shapes = self._compute_output_shapes()
+
+    def _compute_output_shapes(self):
+        """The subclass should implement this method to compute the shape of
+        outputs. This method can assume that the `data_shapes` and `label_shapes`
+        are already initialized.
+        """
+        raise NotImplementedError()
+
+    def init_optimizer(self, kvstore='local', optimizer='sgd',
+                       optimizer_params=(('learning_rate', 0.01),), force_init=False):
+        """Install and initialize optimizers. By default we do nothing. Subclass
+        should
+
+        Parameters
+        ----------
+        kvstore : str or KVStore
+            Default `'local'`.
+        optimizer : str or Optimizer
+            Default `'sgd'`
+        optimizer_params : dict
+            Default `(('learning_rate', 0.01),)`. The default value is not a dictionary,
+            just to avoid pylint warning of dangerous default values.
+        force_init : bool
+            Default `False`, indicating whether we should force re-initializing the
+            optimizer in the case an optimizer is already installed.
+        """
+        pass
+
+
+class PythonLossModule(PythonModule):
+    """A convenient module class that implements many of the module APIs as
+    empty functions.
+
+    Parameters
+    ----------
+    name : str
+        Names of the module. The outputs will be named `[name + '_output']`.
+    data_names : list of str
+        Default `['data']`. Names of the data expected by this module.
+        Should be a list of only one name.
+    label_names : list of str
+        Default `['softmax_label']`. Names of the labels expected by the module.
+        Should be a list of only one name.
+    grad_func : function
+        Optional. If not `None`, should be a function that takes `scores`
+        and `labels`, both of type `NDArray`, and return the gradients with
+        respect to the scores according to this loss function. The return
+        value could be a numpy array or an `NDArray`.
+    """
+    def __init__(self, name='pyloss', data_names=('data',), label_names=('softmax_label',),
+                 logger=logging, grad_func=None):
+        super(PythonLossModule, self).__init__(data_names, label_names,
+                                               [name + '_output'], logger=logger)
+        self._name = name
+        assert len(data_names) == 1
+        assert len(label_names) == 1
+
+        self._scores = None
+        self._labels = None
+        self._scores_grad = None
+
+        if grad_func is not None:
+            assert callable(grad_func)
+        self._grad_func = grad_func
+
+    def _compute_output_shapes(self):
+        """Compute the shapes of outputs. As a loss module with outputs, we simply
+        output whatever we receive as inputs (i.e. the scores).
+        """
+        return [(self._name + '_output', self._data_shapes[0][1])]
+
+    def forward(self, data_batch, is_train=None):
+        """Forward computation. Here we do nothing but to keep a reference to
+        the scores and the labels so that we can do backward computation.
+
+        Parameters
+        ----------
+        data_batch : DataBatch
+            Could be anything with similar API implemented.
+        is_train : bool
+            Default is `None`, which means `is_train` takes the value of `self.for_training`.
+        """
+        self._scores = data_batch.data[0]
+
+        if is_train is None:
+            is_train = self.for_training
+
+        if is_train:
+            self._labels = data_batch.label[0]
+
+    def get_outputs(self, merge_multi_context=True):
+        """Get outputs of the previous forward computation. As a output loss module,
+        we treat the inputs to this module as scores, and simply return them.
+
+        Parameters
+        ----------
+        merge_multi_context : bool
+            Should always be `True`, because we do not use multiple contexts for computing.
+        """
+        assert merge_multi_context is True
+        return [self._scores]
+
+    def backward(self, out_grads=None):
+        """Backward computation.
+
+        Parameters
+        ----------
+        out_grads : NDArray or list of NDArray, optional
+            Gradient on the outputs to be propagated back.
+            This parameter is only needed when bind is called
+            on outputs that are not a loss function.
+        """
+        assert out_grads is None, 'For a loss module, out_grads should be None'
+        assert self.for_training
+
+        self._backward_impl()
+
+    def _backward_impl(self):
+        """Actual implementation of the backward computation. The computation
+        should take `self._scores` and `self._labels` and then compute the
+   
