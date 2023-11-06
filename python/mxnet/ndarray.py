@@ -429,4 +429,236 @@ class NDArray(object):
     # pylint: enable= invalid-name, undefined-variable
 
     def asnumpy(self):
-        """Return
+        """Return a copied numpy array of current array.
+
+        Returns
+        -------
+        array : numpy.ndarray
+            A copy of array content.
+        """
+        data = np.empty(self.shape, dtype=self.dtype)
+        check_call(_LIB.MXNDArraySyncCopyToCPU(
+            self.handle,
+            data.ctypes.data_as(ctypes.c_void_p),
+            ctypes.c_size_t(data.size)))
+        return data
+
+    def asscalar(self):
+        """Return a CPU scalar(float) of current ndarray.
+
+        This ndarray must have shape (1,)
+
+        Returns
+        -------
+        scalar : np.float
+            The scalar representation of the ndarray.
+        """
+        if self.shape != (1,):
+            raise ValueError("The current array is not a scalar")
+        return self.asnumpy()[0]
+
+    def astype(self, dtype):
+        """Return a copied numpy array of current array with specified type.
+
+        Parameters
+        ----------
+        dtype : numpy.dtype or string
+            Desired type of result array.
+
+        Returns
+        -------
+        array : numpy.ndarray
+            A copy of array content.
+        """
+        res = empty(self.shape, ctx=self.context, dtype=dtype)
+        self.copyto(res)
+        return res
+
+    def copyto(self, other):
+        """Copy the content of current array to other.
+
+        When other is NDArray, the content is copied over.
+        When other is a Context, a new NDArray in the context
+        will be created as target
+
+        Parameters
+        ----------
+        other : NDArray or Context
+            Target NDArray or context we want to copy data to.
+
+        Returns
+        -------
+        dst : NDArray
+            The copy target NDArray
+        """
+        if isinstance(other, NDArray):
+            if other.handle is self.handle:
+                warnings.warn('copy an array to itself, is it intended?',
+                              RuntimeWarning)
+                return
+            return _internal._copyto(self, out=other)
+        elif isinstance(other, Context):
+            hret = NDArray(_new_alloc_handle(self.shape, other, True, self.dtype))
+            return _internal._copyto(self, out=hret)
+        else:
+            raise TypeError('copyto do not support type ' + str(type(other)))
+
+    def copy(self):
+        """Make a copy of the current ndarray on the same context
+
+        Return
+        ------
+        cpy : NDArray
+            The copy
+        """
+        return self.copyto(self.context)
+
+    # pylint: enable= no-member
+
+    def as_in_context(self, context):
+        """Return an `NDArray` that lives in the target context. If the array
+        is already in that context, `self` is returned. Otherwise, a copy is
+        made.
+
+        Parameters
+        ----------
+        context : Context
+            The target context we want the return value to live in.
+
+        Returns
+        -------
+        A copy or `self` as an `NDArray` that lives in the target context.
+        """
+        if self.context == context:
+            return self
+        return self.copyto(context)
+
+
+def onehot_encode(indices, out):
+    """One hot encoding indices into matrix out.
+
+    Parameters
+    ----------
+    indices: NDArray
+        An NDArray containing indices of the categorical features.
+
+    out: NDArray
+        The result holder of the encoding.
+
+    Returns
+    -------
+    out: Array
+        Same as out.
+    """
+    # pylint: disable= no-member, protected-access
+    return _internal._onehot_encode(indices, out, out=out)
+    # pylint: enable= no-member, protected-access
+
+
+def empty(shape, ctx=None, dtype=mx_real_t):
+    """Create an empty uninitialized new NDArray, with specified shape.
+
+    Parameters
+    ----------
+    shape : tuple
+        shape of the NDArray.
+
+    ctx : Context, optional
+        The context of the NDArray, default to current default context.
+
+    Returns
+    -------
+    out: Array
+        The created NDArray.
+    """
+    if isinstance(shape, int):
+        shape = (shape, )
+    if ctx is None:
+        ctx = Context.default_ctx
+    return NDArray(handle=_new_alloc_handle(shape, ctx, False, dtype))
+
+#pylint: disable= too-many-arguments, no-member, protected-access
+def _ufunc_helper(lhs, rhs, fn_array, fn_scalar, lfn_scalar, rfn_scalar=None):
+    """ Helper function for element-wise operation
+    The function will perform numpy-like broadcasting if needed and call different functions
+
+    Parameters
+    ----------
+    lhs : NDArray or numeric value
+        left hande side operand
+
+    rhs : NDArray or numeric value
+        right hand side operand
+
+    fn_array : function
+        function to be called if both lhs and rhs are of NDArray type
+
+    fn_scalar : function
+        function to be called if both lhs and rhs are numeric values
+
+    lfn_scalar : function
+        function to be called if lhs is NDArray while rhs is numeric value
+
+    rfn_scalar : function
+        function to be called if lhs is numeric value while rhs is NDArray;
+        if none is provided, then the function is commutative, so rfn_scalar is equal to lfn_scalar
+
+    Returns
+    -------
+    out: NDArray
+        result array
+    """
+    if isinstance(lhs, numeric_types):
+        if isinstance(rhs, numeric_types):
+            return fn_scalar(lhs, rhs)
+        else:
+            if rfn_scalar is None:
+                # commutative function
+                return lfn_scalar(rhs, float(lhs))
+            else:
+                return rfn_scalar(rhs, float(lhs))
+    elif isinstance(rhs, numeric_types):
+        return lfn_scalar(lhs, float(rhs))
+    elif isinstance(rhs, NDArray):
+        # check whether broadcasting is needed
+        lsize = functools.reduce(operator.mul, lhs.shape)
+        rsize = functools.reduce(operator.mul, rhs.shape)
+        if lsize < rsize:
+            lhs = lhs.broadcast_to(rhs.shape)
+        elif lsize > rsize:
+            rhs = rhs.broadcast_to(lhs.shape)
+        return fn_array(lhs, rhs)
+    else:
+        raise TypeError('type %s not supported' % str(type(rhs)))
+#pylint: enable= too-many-arguments, no-member, protected-access
+
+def add(lhs, rhs):
+    """ Perform element-wise addition
+
+    Parameters
+    ----------
+    lhs : Array or float value
+        left hand side operand
+
+    rhs : Array of float value
+        right hand side operand
+
+    Returns
+    -------
+    out: Array
+        result array
+    """
+    # pylint: disable= no-member, protected-access
+    return _ufunc_helper(
+        lhs,
+        rhs,
+        _internal._plus,
+        operator.add,
+        _internal._plus_scalar,
+        None)
+    # pylint: enable= no-member, protected-access
+
+def subtract(lhs, rhs):
+    """ Perform element-wise subtract
+
+    Paramet
