@@ -943,4 +943,174 @@ def concatenate(arrays, always_copy=True):
     idx = 0
     for arr in arrays:
         ret[idx:idx+arr.shape[0]] = arr
-     
+        idx += arr.shape[0]
+
+    return ret
+
+def load(fname):
+    """Load ndarray from binary file.
+
+    You can also use pickle to do the job if you only work on python.
+    The advantage of load/save is the file is language agnostic.
+    This means the file saved using save can be loaded by other language binding of mxnet.
+    You also get the benefit being able to directly load/save from cloud storage(S3, HDFS)
+
+    Parameters
+    ----------
+    fname : str
+        The name of the file.Can be S3 or HDFS address (remember built with S3 support).
+        Example of fname:
+
+        - `s3://my-bucket/path/my-s3-ndarray`
+        - `hdfs://my-bucket/path/my-hdfs-ndarray`
+        - `/path-to/my-local-ndarray`
+
+    Returns
+    -------
+    out : list of NDArray or dict of str to NDArray
+        List of NDArray or dict of str->NDArray, depending on what was saved.
+    """
+    if not isinstance(fname, string_types):
+        raise TypeError('fname need to be string')
+    out_size = mx_uint()
+    out_name_size = mx_uint()
+    handles = ctypes.POINTER(NDArrayHandle)()
+    names = ctypes.POINTER(ctypes.c_char_p)()
+    check_call(_LIB.MXNDArrayLoad(c_str(fname),
+                                  ctypes.byref(out_size),
+                                  ctypes.byref(handles),
+                                  ctypes.byref(out_name_size),
+                                  ctypes.byref(names)))
+    if out_name_size.value == 0:
+        return [NDArray(NDArrayHandle(handles[i])) for i in range(out_size.value)]
+    else:
+        assert out_name_size.value == out_size.value
+        return dict(
+            (py_str(names[i]), NDArray(NDArrayHandle(handles[i]))) for i in range(out_size.value))
+
+
+def save(fname, data):
+    """Save list of NDArray or dict of str->NDArray to binary file.
+
+    You can also use pickle to do the job if you only work on python.
+    The advantage of load/save is the file is language agnostic.
+    This means the file saved using save can be loaded by other language binding of mxnet.
+    You also get the benefit being able to directly load/save from cloud storage(S3, HDFS)
+
+    Parameters
+    ----------
+    fname : str
+        The name of the file.Can be S3 or HDFS address (remember built with S3 support).
+        Example of fname:
+
+        - `s3://my-bucket/path/my-s3-ndarray`
+        - `hdfs://my-bucket/path/my-hdfs-ndarray`
+        - `/path-to/my-local-ndarray`
+
+    data : list of NDArray or dict of str to NDArray
+        The data to be saved.
+    """
+    handles = []
+    if isinstance(data, dict):
+        keys = []
+        for key, val in data.items():
+            if not isinstance(key, string_types):
+                raise TypeError('save only accept dict str->NDArray or list of NDArray')
+            if not isinstance(val, NDArray):
+                raise TypeError('save only accept dict str->NDArray or list of NDArray')
+            keys.append(c_str(key))
+            handles.append(val.handle)
+        keys = c_array(ctypes.c_char_p, keys)
+    else:
+        for val in data:
+            if not isinstance(val, NDArray):
+                raise TypeError('save only accept dict str->NDArray or list of NDArray')
+            handles.append(val.handle)
+        keys = None
+    check_call(_LIB.MXNDArraySave(c_str(fname),
+                                  mx_uint(len(handles)),
+                                  c_array(NDArrayHandle, handles),
+                                  keys))
+
+def imdecode(str_img, clip_rect=(0, 0, 0, 0), out=None, index=0, channels=3, mean=None):
+    """Decode an image from string. Requires OpenCV to work.
+
+    Parameters
+    ----------
+    str_img : str
+        binary image data
+    clip_rect : iterable of 4 int
+        clip decoded image to rectangle (x0, y0, x1, y1)
+    out : NDArray
+        output buffer. can be 3 dimensional (c, h, w) or 4 dimensional (n, c, h, w)
+    index : int
+        output decoded image to i-th slice of 4 dimensional buffer
+    channels : int
+        number of channels to output. Decode to grey scale when channels = 1.
+    mean : NDArray
+        substract mean from decode image before outputing.
+    """
+    # pylint: disable= no-member, protected-access, too-many-arguments
+    if mean is None:
+        mean = NDArray(_new_empty_handle())
+    if out is None:
+        return _internal._imdecode(mean, index,
+                                   clip_rect[0],
+                                   clip_rect[1],
+                                   clip_rect[2],
+                                   clip_rect[3],
+                                   channels,
+                                   len(str_img),
+                                   str_img=str_img)
+    else:
+        return _internal._imdecode(mean, index,
+                                   clip_rect[0],
+                                   clip_rect[1],
+                                   clip_rect[2],
+                                   clip_rect[3],
+                                   channels,
+                                   len(str_img),
+                                   str_img=str_img,
+                                   out=out)
+
+# pylint: disable=too-many-locals, invalid-name
+def _make_ndarray_function(handle):
+    """Create a NDArray function from the FunctionHandle."""
+    NDARRAY_ARG_BEFORE_SCALAR = 1
+    ACCEPT_EMPTY_MUTATE_TARGET = 1 << 2
+    # Get the property of NDArray
+    n_used_vars = mx_uint()
+    n_scalars = mx_uint()
+    n_mutate_vars = mx_uint()
+    type_mask = ctypes.c_int()
+    check_call(_LIB.MXFuncDescribe(
+        handle,
+        ctypes.byref(n_used_vars),
+        ctypes.byref(n_scalars),
+        ctypes.byref(n_mutate_vars),
+        ctypes.byref(type_mask)))
+    n_mutate_vars = n_mutate_vars.value
+    n_used_vars = n_used_vars.value
+    n_scalars = n_scalars.value
+    type_mask = type_mask.value
+    accept_empty_mutate = (type_mask & ACCEPT_EMPTY_MUTATE_TARGET) != 0
+    # infer type of the function
+    if (type_mask & NDARRAY_ARG_BEFORE_SCALAR) != 0:
+        use_vars_range = range(0, n_used_vars)
+        scalar_range = range(n_used_vars, n_used_vars + n_scalars)
+    else:
+        scalar_range = range(0, n_scalars)
+        use_vars_range = range(n_scalars, n_used_vars + n_scalars)
+
+    # Get the information from the function
+    name = ctypes.c_char_p()
+    desc = ctypes.c_char_p()
+    num_args = mx_uint()
+    arg_names = ctypes.POINTER(ctypes.c_char_p)()
+    arg_types = ctypes.POINTER(ctypes.c_char_p)()
+    arg_descs = ctypes.POINTER(ctypes.c_char_p)()
+    ret_type = ctypes.c_char_p()
+
+    check_call(_LIB.MXFuncGetInfo(
+        handle, ctypes.byref(name), ctypes.byref(desc),
+        ctypes.byref(num_a
