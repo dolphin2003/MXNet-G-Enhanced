@@ -661,4 +661,286 @@ def add(lhs, rhs):
 def subtract(lhs, rhs):
     """ Perform element-wise subtract
 
-    Paramet
+    Parameters
+    ----------
+    lhs : Array or float value
+        left hand side operand
+
+    rhs : Array of float value
+        right hand side operand
+
+    Returns
+    -------
+    out: Array
+        result array
+    """
+    # pylint: disable= no-member, protected-access
+    return _ufunc_helper(
+        lhs,
+        rhs,
+        _internal._minus,
+        operator.sub,
+        _internal._minus_scalar,
+        _internal._rminus_scalar)
+    # pylint: enable= no-member, protected-access
+
+def multiply(lhs, rhs):
+    """ Perform element-wise multiplication
+
+    Parameters
+    ----------
+    lhs : Array or float value
+        left hand side operand
+
+    rhs : Array of float value
+        right hand side operand
+
+    Returns
+    -------
+    out: Array
+        result array
+    """
+    # pylint: disable= no-member, protected-access
+    return _ufunc_helper(
+        lhs,
+        rhs,
+        _internal._mul,
+        operator.mul,
+        _internal._mul_scalar,
+        None)
+    # pylint: enable= no-member, protected-access
+
+def divide(lhs, rhs):
+    """ Perform element-wise divide
+
+    Parameters
+    ----------
+    lhs : Array or float value
+        left hand side operand
+
+    rhs : Array of float value
+        right hand side operand
+
+    Returns
+    -------
+    out: Array
+        result array
+    """
+    # pylint: disable= no-member, protected-access
+    return _ufunc_helper(
+        lhs,
+        rhs,
+        _internal._div,
+        operator.truediv,
+        _internal._div_scalar,
+        _internal._rdiv_scalar)
+    # pylint: enable= no-member, protected-access
+
+def power(lhs, rhs):
+    """ Perform power operator
+
+    Parameters
+    ----------
+    lhs : Array or float value
+        left hand side operand
+
+    rhs : Array of float value
+        right hand side operand
+
+    Returns
+    -------
+    out: Array
+        result array
+    """
+    # pylint: disable= no-member, protected-access
+    return _ufunc_helper(
+        lhs,
+        rhs,
+        _internal._power,
+        operator.pow,
+        _internal._power_scalar,
+        _internal._rpower_scalar)
+    # pylint: enable= no-member, protected-access
+
+def maximum(lhs, rhs):
+    """ Perform maximum operator
+
+    Parameters
+    ----------
+    lhs : Array or float value
+        left hand side operand
+
+    rhs : Array of float value
+        right hand side operand
+
+    Returns
+    -------
+    out: Array
+        result array
+    """
+    # pylint: disable= no-member, protected-access
+    return _ufunc_helper(
+        lhs,
+        rhs,
+        _internal._maximum,
+        lambda x, y: x if x > y else y,
+        _internal._maximum_scalar,
+        None)
+    # pylint: enable= no-member, protected-access
+
+def minimum(lhs, rhs):
+    """ Perform minimum operator
+
+    Parameters
+    ----------
+    lhs : Array or float value
+        left hand side operand
+
+    rhs : Array of float value
+        right hand side operand
+
+    Returns
+    -------
+    out: Array
+        result array
+    """
+    # pylint: disable= no-member, protected-access
+    return _ufunc_helper(
+        lhs,
+        rhs,
+        _internal._minimum,
+        lambda x, y: x if x < y else y,
+        _internal._minimum_scalar,
+        None)
+    # pylint: enable= no-member, protected-access
+
+def true_divide(lhs, rhs):
+    """ Same as numpy's true_divide. It adjusts the output type to present the best answer,
+    regardless of input types.
+    """
+    return divide(lhs, rhs)
+
+def negative(arr):
+    """ Return the negation of array values """
+    return multiply(arr, -1.0)
+
+def zeros(shape, ctx=None, dtype=mx_real_t):
+    """Create a new NDArray filled with 0, with specified shape.
+
+    Parameters
+    ----------
+    shape : tuple
+        shape of the NDArray.
+    ctx : Context, optional.
+        The context of the NDArray, default to current default context.
+
+    Returns
+    -------
+    out: Array
+        The created NDArray.
+    """
+    arr = empty(shape, ctx, dtype)
+    arr[:] = 0.0
+    return arr
+
+def ones(shape, ctx=None, dtype=mx_real_t):
+    """Create a new NDArray filled with 1, with specified shape.
+
+    Parameters
+    ----------
+    shape : tuple
+        shape of the NDArray.
+    ctx : Context, optional
+        The context of the NDArray, default to current default context.
+
+    Returns
+    -------
+    out: Array
+        The created NDArray.
+    """
+    arr = empty(shape, ctx, dtype)
+    arr[:] = 1.0
+    return arr
+
+def full(shape, val, ctx=None):
+    """Create a new NDArray filled with given value, with specified shape.
+
+    Parameters
+    ----------
+    shape : tuple
+        shape of the NDArray.
+    val : float
+        value to be filled with.
+    ctx : Context, optional
+        The context of the NDArray, default to current default context.
+
+    Returns
+    -------
+    out: Array
+        The created NDArray.
+    """
+    arr = empty(shape, ctx)
+    arr[:] = val
+    return arr
+
+def array(source_array, ctx=None, dtype=mx_real_t):
+    """Create a new NDArray that copies content from source_array.
+
+    Parameters
+    ----------
+    source_array : array_like
+        Source data to create NDArray from.
+
+    ctx : Context, optional
+        The context of the NDArray, default to current default context.
+
+    Returns
+    -------
+    out: Array
+        The created NDArray.
+    """
+
+    if not isinstance(source_array, np.ndarray):
+        try:
+            source_array = np.array(source_array, dtype=dtype)
+        except:
+            raise TypeError('source_array must be array like object')
+    arr = empty(source_array.shape, ctx, dtype)
+    arr[:] = source_array
+    return arr
+
+def concatenate(arrays, always_copy=True):
+    """Concatenate a list of NDArrays along the first dimension.
+
+    Parameters
+    ----------
+    arrays : list of NDArray
+        Arrays to be concatenate. They must have identical shape except
+        the first dimension. They also must have the same data type.
+    always_copy : bool
+        Default `True`. When not `True`, if the arrays only contain one
+        `NDArray`, that element will be returned directly, avoid copying.
+
+    Returns
+    -------
+    An `NDArray` that lives on the same context as `arrays[0].context`.
+    """
+    assert isinstance(arrays, list)
+    assert len(arrays) > 0
+    assert isinstance(arrays[0], NDArray)
+
+    if not always_copy and len(arrays) == 1:
+        return arrays[0]
+
+    shape0 = arrays[0].shape[0]
+    shape_rest = arrays[0].shape[1:]
+    dtype = arrays[0].dtype
+    for arr in arrays[1:]:
+        shape0 += arr.shape[0]
+        assert shape_rest == arr.shape[1:]
+        assert dtype == arr.dtype
+    ret = empty((shape0,) + shape_rest, ctx=arrays[0].context, dtype=dtype)
+    idx = 0
+    for arr in arrays:
+        ret[idx:idx+arr.shape[0]] = arr
+     
