@@ -1,0 +1,13 @@
+<assembly>
+  <id>full</id>
+  <formats>
+    <format>jar</format>
+  </formats>
+  <includeBaseDirectory>false</includeBaseDirectory>
+  <dependencySets>
+    <dependencySet>
+      <includes>
+        <include>*:*:jar</include>
+      </includes>
+      <outputDirectory>/</outputDirectory>
+      <useProjectArtifact>true</useProjectArtif
