@@ -16,12 +16,14 @@
     </dependencySet>
     <dependencySet>
       <outputDirectory>lib/native</outputDirectory>
-      <outputFileNameMapping>libmxnet-scala.so</outputFileNameMapping>
+      <outputFileNameMapping>${artifact.artifactId}${dashClassifier?}.${artifact.extension}</outputFileNameMapping>
       <unpack>false</unpack>
       <useProjectArtifact>false</useProjectArtifact>
       <useStrictFiltering>false</useStrictFiltering>
       <includes>
-        <include>ml.dmlc.mxnet:libmxnet-scala-linux-x86_64-cpu:so</include>
+        <include>*:*:dll:*</include>
+        <include>*:*:so:*</include>
+        <include>*:*:jnilib:*</include>
       </includes>
     </dependencySet>
   </dependencySets>
