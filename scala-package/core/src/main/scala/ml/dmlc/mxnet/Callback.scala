@@ -21,4 +21,20 @@ object Callback {
 
       if (init) {
         if (count % frequent == 0) {
-          val speed = frequent
+          val speed = frequent.toDouble * batchSize / (System.currentTimeMillis - tic) * 1000
+          if (evalMetric != null) {
+            val (name, value) = evalMetric.get
+            logger.info("Epoch[%d] Batch [%d]\tSpeed: %.2f samples/sec\tTrain-%s=%f".format(
+              epoch, count, speed, name, value))
+          } else {
+            logger.info("Iter[%d] Batch [%d]\tSpeed: %.2f samples/sec".format(epoch, count, speed))
+          }
+          tic = System.currentTimeMillis
+        }
+      } else {
+        init = true
+        tic = System.currentTimeMillis
+      }
+    }
+  }
+}
