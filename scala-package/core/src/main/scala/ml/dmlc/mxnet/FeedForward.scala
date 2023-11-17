@@ -265,3 +265,185 @@ class FeedForward(val symbol: Symbol, val ctx: Array[Context] = Array(Context.cp
   def fit(trainData: DataIter, evalData: DataIter, kvStore: KVStore): Unit = {
     fit(trainData, evalData, new Accuracy(), kvStore)
   }
+
+  private def fit(trainData: DataIter, evalData: DataIter, evalMetric: EvalMetric = new Accuracy(),
+                  kvStore: Option[KVStore], updateOnKVStore: Boolean,
+                  epochEndCallback: EpochEndCallback = null,
+                  batchEndCallback: BatchEndCallback = null, logger: Logger = FeedForward.logger,
+                  workLoadList: Seq[Float] = null): Unit = {
+    require(evalMetric != null, "evalMetric cannot be null")
+    val (argNames, paramNames, auxNames) =
+      initParams(trainData.provideData ++ trainData.provideLabel)
+
+    // init optimizer
+    val batchSizeMultiplier = kvStore.map { kv =>
+      if (kv.`type` == "dist_sync") {
+        kv.numWorkers
+      } else {
+        1
+      }
+    }
+    val batchSize = trainData.batchSize * batchSizeMultiplier.getOrElse(1)
+    this.optimizer.setArgNames(argNames)
+    this.optimizer.setRescaleGrad(1f / batchSize)
+
+    logger.debug("Start training on multi-device")
+    Model.trainMultiDevice(
+      symbol, ctx, argNames, paramNames, auxNames,
+      _argParams, _auxParams,
+      this.beginEpoch, this.numEpoch,
+      this.epochSize, this.optimizer,
+      kvStore, updateOnKVStore,
+      trainData = trainData, evalData = Option(evalData),
+      evalMetric = evalMetric,
+      epochEndCallback = Option(epochEndCallback),
+      batchEndCallback = Option(batchEndCallback),
+      logger = logger, workLoadList = workLoadList,
+      monitor = monitor)
+  }
+
+  /**
+   * Checkpoint the model checkpoint into file.
+   * You can also use pickle to do the job if you only work on python.
+   * The advantage of load/save is the file is language agnostic.
+   * This means the file saved using save can be loaded by other language binding of mxnet.
+   * You also get the benefit being able to directly load/save from cloud storage(S3, HDFS)
+   * @param prefix Prefix of model name.
+   * @see FeedForward.load : the method to load the model back.
+   * @note
+   * - ``prefix-symbol.json`` will be saved for symbol.
+   * - ``prefix-epoch.params`` will be saved for parameters.
+   */
+  def save(prefix: String, epoch: Int = this.numEpoch): Unit = {
+    require(epoch >= 0)
+    Model.saveCheckpoint(prefix, epoch, this.symbol, getArgParams, getAuxParams)
+  }
+
+  /**
+   * Serialize the model to Java byte array
+   * @return serialized model bytes
+   */
+  def serialize(): Array[Byte] = {
+    Model.serialize(this.symbol, getArgParams, getAuxParams)
+  }
+}
+
+object FeedForward {
+  private val logger: Logger = LoggerFactory.getLogger(classOf[FeedForward])
+  // Check if name is a data argument.
+  private def isDataArg(name: String): Boolean = {
+    name.endsWith("data") || name.endsWith("label")
+  }
+
+  /**
+   * Load model checkpoint from file.
+   * @param prefix Prefix of model name.
+   * @param epoch epoch number of model we would like to load.
+   * @return The loaded model that can be used for prediction.
+   * @note
+   * - ``prefix-symbol.json`` will be saved for symbol.
+   * - ``prefix-epoch.params`` will be saved for parameters.
+   */
+  def load(prefix: String, epoch: Int,
+           ctx: Array[Context] = Array(Context.cpu()),
+           numEpoch: Int = -1,
+           epochSize: Int = -1,
+           optimizer: Optimizer = new SGD(),
+           initializer: Initializer = new Uniform(0.01f),
+           batchSize: Int = 128,
+           allowExtraParams: Boolean = false): FeedForward = {
+    val (symbol, argParams, auxParams) = Model.loadCheckpoint(prefix, epoch)
+    new FeedForward(symbol, ctx = ctx,
+      argParams = argParams, auxParams = auxParams,
+      beginEpoch = epoch, numEpoch = numEpoch,
+      epochSize = epochSize, optimizer = optimizer,
+      initializer = initializer, batchSize = batchSize,
+      allowExtraParams = allowExtraParams)
+  }
+
+  /**
+   * Deserialize bytes to model.
+   * @param bytes serialized model bytes.
+   * @return The loaded model that can be used for prediction.
+   */
+  def deserialize(bytes: Array[Byte], epoch: Int = 0,
+                  ctx: Array[Context] = Array(Context.cpu()),
+                  numEpoch: Int = -1,
+                  epochSize: Int = -1,
+                  optimizer: Optimizer = new SGD(),
+                  initializer: Initializer = new Uniform(0.01f),
+                  batchSize: Int = 128,
+                  allowExtraParams: Boolean = false): FeedForward = {
+    val (symbol, argParams, auxParams) = Model.deserialize(bytes)
+    new FeedForward(symbol, ctx = ctx,
+      argParams = argParams, auxParams = auxParams,
+      beginEpoch = epoch, numEpoch = numEpoch,
+      epochSize = epochSize, optimizer = optimizer,
+      initializer = initializer, batchSize = batchSize,
+      allowExtraParams = allowExtraParams)
+  }
+
+  def newBuilder(modelDef: Symbol): Builder = new Builder(modelDef)
+
+  class Builder private[FeedForward](modelDef: Symbol) {
+    private var ctx: Array[Context] = Array(Context.cpu())
+    private var numEpoch: Int = -1
+    private var epochSize: Int = -1
+    private var optimizer: Optimizer = new SGD()
+    private var initializer: Initializer = new Uniform(0.01f)
+    private var batchSize: Int = 128
+    private var argParams: Map[String, NDArray] = null
+    private var auxParams: Map[String, NDArray] = null
+    private var allowExtraParams: Boolean = false
+    private var beginEpoch: Int = 0
+    private var trainData: DataIter = null
+    private var evalData: DataIter = null
+    private var evalMetric: EvalMetric = new Accuracy()
+
+    private var kvStoreInst: KVStore = null
+    private var kvStoreType: String = "local"
+
+    private var epochEndCallback: EpochEndCallback = null
+    private var batchEndCallback: BatchEndCallback = null
+    private var logger: Logger = FeedForward.logger
+    private var workLoadList: Seq[Float] = null
+
+    /**
+     * Set ctx The device context of training and prediction.
+     * To use multi GPU training, pass in a list of gpu contexts.
+     */
+    def setContext(ctx: Array[Context]): Builder = {
+      this.ctx = ctx
+      this
+    }
+
+    /**
+     * Set number of training epochs
+     */
+    def setNumEpoch(numEpoch: Int): Builder = {
+      this.numEpoch = numEpoch
+      this
+    }
+
+    /**
+     * Set number of batches in a epoch. In default, it is set to
+     * ceil(num_train_examples / batch_size)
+     */
+    def setEpochSize(epochSize: Int): Builder = {
+      this.epochSize = epochSize
+      this
+    }
+
+    /**
+     * Set optimizer for training. Default SGD.
+     */
+    def setOptimizer(opt: Optimizer): Builder = {
+      this.optimizer = opt
+      this
+    }
+
+    /**
+     * Set the initialization scheme used. Default Uniform(0.01f).
+     */
+    def setInitializer(initializer: Initializer): Builder = {
+      this.initializer = initial
