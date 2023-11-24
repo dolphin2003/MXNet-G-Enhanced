@@ -446,4 +446,151 @@ object FeedForward {
      * Set the initialization scheme used. Default Uniform(0.01f).
      */
     def setInitializer(initializer: Initializer): Builder = {
-      this.initializer = initial
+      this.initializer = initializer
+      this
+    }
+
+    /**
+     * Set the batch size of training data.
+     */
+    def setBatchSize(batchSize: Int): Builder = {
+      this.batchSize = batchSize
+      this
+    }
+
+    /**
+     * Set the model parameter, dict of name to NDArray of net's weights.
+     */
+    def setArgParams(argParams: Map[String, NDArray]): Builder = {
+      this.argParams = argParams
+      this
+    }
+
+    /**
+     * Set the model parameter, dict of name to NDArray of net's auxiliary states
+     */
+    def setAuxParams(auxParams: Map[String, NDArray]): Builder = {
+      this.auxParams = auxParams
+      this
+    }
+
+    /**
+     * Whether allow extra parameters that are not needed by symbol
+     * to be passed by aux_params and arg_params.
+     * If this is True, no error will be thrown when aux_params and arg_params
+     * contain extra parameters than needed.
+     */
+    def setAllowExtraParams(allowExtraParams: Boolean): Builder = {
+      this.allowExtraParams = allowExtraParams
+      this
+    }
+
+    /**
+     * Set the beginning training epoch.
+     */
+    def setBeginEpoch(beginEpoch: Int): Builder = {
+      this.beginEpoch = beginEpoch
+      this
+    }
+
+    /**
+     * Set the training data
+     */
+    def setTrainData(trainData: DataIter): Builder = {
+      this.trainData = trainData
+      this
+    }
+
+    /**
+     * Set the evaluation data
+     */
+    def setEvalData(evalData: DataIter): Builder = {
+      this.evalData = evalData
+      this
+    }
+
+    /**
+     * Set the evaluation metric. Default Accuracy()
+     */
+    def setEvalMetric(metric: EvalMetric): Builder = {
+      this.evalMetric = metric
+      this
+    }
+
+    /**
+     * this will take precedence over the setKVStore(String) version
+     */
+    def setKVStore(kv: KVStore): Builder = {
+      this.kvStoreInst = kv
+      this
+    }
+
+    /**
+     * A string kvstore type:
+     * 'local' : multi-devices on a single machine, will automatically
+     * choose one from 'local_update_cpu', 'local_allreduce_cpu', and
+     * 'local_allreduce_device'
+     * 'dist_sync' : multi-machines with BSP
+     * 'dist_async' : multi-machines with partical asynchronous
+     * In default uses 'local', often no need to change for single machine.
+     */
+    def setKVStore(kv: String): Builder = {
+      this.kvStoreType = kv
+      this
+    }
+
+    /**
+     * A callback that is invoked at end of each epoch.
+     * This can be used to checkpoint model each epoch.
+     */
+    def setEpochEndCallback(epochEndCallback: EpochEndCallback): Builder = {
+      this.epochEndCallback = epochEndCallback
+      this
+    }
+
+    /**
+     * batchEndCallback A callback that is invoked at end of each batch.
+     * For print purpose.
+     */
+    def setBatchEndCallback(batchEndCallback: BatchEndCallback): Builder = {
+      this.batchEndCallback = batchEndCallback
+      this
+    }
+
+    /**
+     * When not specified, default logger will be used.
+     */
+    def setLogger(logger: Logger): Builder = {
+      this.logger = logger
+      this
+    }
+
+    /**
+     * Set the list of work load for different devices, in the same order as ctx
+     */
+    def setWorkLoadList(workLoadList: Seq[Float]): Builder = {
+      this.workLoadList = workLoadList
+      this
+    }
+
+    /**
+     * Construct the FeedForward model and fit on the input training data
+     * @return the trained model
+     */
+    def build(): FeedForward = {
+      require(trainData != null, "Training data missing")
+      val model = new FeedForward(
+        modelDef, ctx, numEpoch, epochSize,
+        optimizer, initializer, batchSize,
+        argParams, auxParams, allowExtraParams, beginEpoch)
+      if (kvStoreInst == null) {
+        model.fit(trainData, evalData, evalMetric, kvStoreType,
+                  epochEndCallback, batchEndCallback, logger, workLoadList)
+      } else {
+        model.fit(trainData, evalData, evalMetric, kvStoreInst,
+                  epochEndCallback, batchEndCallback, logger, workLoadList)
+      }
+      model
+    }
+  }
+}
