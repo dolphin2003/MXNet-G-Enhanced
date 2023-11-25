@@ -38,4 +38,16 @@ class FactorScheduler(protected var step: Int, protected var factor: Float) exte
   protected var count: Int = 0
   private val logger = LoggerFactory.getLogger(classOf[FactorScheduler])
 
-  require(ste
+  require(step >= 1, "Schedule step must be greater or equal than 1 round")
+  require(factor < 1.0, "Factor must be less than 1 to make lr reduce")
+
+  def apply(numUpdate: Int): Float = {
+
+    if (numUpdate > this.count + this.step) {
+      this.count += this.step
+      this.baseLR *= this.factor
+      this.logger.info(s"Update$numUpdate: Change learning rate to ${this.baseLR}")
+    }
+    this.baseLR
+  }
+}
