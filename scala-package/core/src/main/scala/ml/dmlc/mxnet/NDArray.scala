@@ -496,4 +496,205 @@ object NDArray {
 
   def randomGaussian(loc: Float, scale: Float, out: NDArray): NDArray = {
     require(out != null)
-    NDArray.invokeGenericFunc("_sample_normal", kwargs
+    NDArray.invokeGenericFunc("_sample_normal", kwargs = Map[String, Any](
+      "loc" -> loc, "scale" -> scale, "shape" -> out.shape, "out" -> out))(0)
+  }
+
+  /**
+   * Create a new NDArray that copies content from source_array.
+   * @param sourceArr Source data to create NDArray from.
+   * @param shape shape of the NDArray
+   * @param ctx The context of the NDArray, default to current default context.
+   * @return The created NDArray.
+   */
+  def array(sourceArr: Array[Float], shape: Shape, ctx: Context = null): NDArray = {
+     val arr = empty(shape, ctx)
+     arr.set(sourceArr)
+     arr
+  }
+
+  /**
+   * Join a sequence of arrays at axis-0
+   * TODO: shall we make it native?
+   * @param arrays
+   */
+  def concatenate(arrays: Seq[NDArray], ctx: Context = null): NDArray = {
+    require(arrays != null && arrays.size > 0, "arrays empty")
+    val array0 = arrays.head
+    val shape = array0.shape.drop(1)
+    var axis0 = array0.shape(0)
+    arrays.drop(1).foreach { array =>
+      require(shape == array.shape.drop(1),
+        s"shape mismatch between ${array.shape} and $shape")
+      axis0 += array.shape(0)
+    }
+
+    val output = NDArray.empty(Shape(axis0) ++ shape, ctx)
+    axis0 = 0
+    arrays.foreach { array =>
+      output.slice(axis0, axis0 + array.shape(0)).set(array)
+      axis0 += array.shape(0)
+    }
+
+    output
+  }
+
+  def concatenate(arrays: NDArray *): NDArray = {
+    concatenate(arrays.toSeq)
+  }
+
+  /**
+   * Load ndarray from binary file.
+   *
+   * You can also use pickle to do the job if you only work on python.
+   * The advantage of load/save is the file is language agnostic.
+   * This means the file saved using save can be loaded by other language binding of mxnet.
+   * You also get the benefit being able to directly load/save from cloud storage(S3, HDFS)
+   *
+   * @param fname
+   *     The name of the file.Can be S3 or HDFS address (remember built with S3 support).
+   *     Example of fname:
+   *     - `s3://my-bucket/path/my-s3-ndarray`
+   *     - `hdfs://my-bucket/path/my-hdfs-ndarray`
+   *     - `/path-to/my-local-ndarray`
+   * @return dict of str->NDArray to be saved
+   */
+  def load(fname: String): (Array[String], Array[NDArray]) = {
+    val outSize = new MXUintRef
+    val outNameSize = new MXUintRef
+    val handles = ArrayBuffer.empty[NDArrayHandle]
+    val names = ArrayBuffer.empty[String]
+    checkCall(_LIB.mxNDArrayLoad(fname, outSize, handles, outNameSize, names))
+    require(outNameSize.value == 0 || outNameSize.value == outSize.value)
+    (names.toArray, handles.map(new NDArray(_)).toArray)
+  }
+
+  def load2Map(fname: String): Map[String, NDArray] = {
+    val (keys, vals) = load(fname)
+    require(keys.length == vals.length, "Loaded NDArrays have no name")
+    (keys zip vals).toMap
+  }
+
+  def load2Array(fname: String): Array[NDArray] = {
+    load(fname)._2
+  }
+
+  /**
+   * Save list of NDArray or dict of str->NDArray to binary file.
+   *
+   * You can also use pickle to do the job if you only work on python.
+   * The advantage of load/save is the file is language agnostic.
+   * This means the file saved using save can be loaded by other language binding of mxnet.
+   * You also get the benefit being able to directly load/save from cloud storage(S3, HDFS)
+   *
+   * @param fname
+   *     The name of the file.Can be S3 or HDFS address (remember built with S3 support).
+   *     Example of fname:
+   *     - `s3://my-bucket/path/my-s3-ndarray`
+   *     - `hdfs://my-bucket/path/my-hdfs-ndarray`
+   *     - `/path-to/my-local-ndarray`
+   * @param data dict of str->NDArray
+   */
+  def save(fname: String, data: Map[String, NDArray]): Unit = {
+    val keys = data.keys.toArray
+    val handles = data.values.map(_.handle).toArray
+    save(fname, keys, handles)
+  }
+
+  def save(fname: String, data: Traversable[NDArray]): Unit = {
+    save(fname, null, data.map(_.handle).toArray)
+  }
+
+  private def save(fname: String, keys: Array[String], handles: Array[NDArrayHandle]): Unit = {
+    checkCall(_LIB.mxNDArraySave(fname, handles, keys))
+  }
+
+  def deserialize(bytes: Array[Byte]): NDArray = {
+    val handleRef = new NDArrayHandleRef
+    checkCall(_LIB.mxNDArrayLoadFromRawBytes(bytes, handleRef))
+    new NDArray(handleRef.value)
+  }
+}
+
+/**
+ * NDArray object in mxnet.
+ * NDArray is basic ndarray/Tensor like data structure in mxnet. <br />
+ * <b>
+ * WARNING: it is your responsibility to clear this object through dispose().
+ * NEVER rely on the GC strategy
+ * </b>
+ */
+// scalastyle:off finalize
+class NDArray private[mxnet](private[mxnet] val handle: NDArrayHandle,
+                             val writable: Boolean = true) {
+  // record arrays who construct this array instance
+  // we use weak reference to prevent gc blocking
+  private[mxnet] val dependencies = mutable.HashMap.empty[Long, WeakReference[NDArray]]
+  private var disposed = false
+  def isDisposed: Boolean = disposed
+  override protected def finalize(): Unit = {
+    dispose()
+  }
+
+  def serialize(): Array[Byte] = {
+    val buf = ArrayBuffer.empty[Byte]
+    checkCall(_LIB.mxNDArraySaveRawBytes(handle, buf))
+    buf.toArray
+  }
+
+  /**
+   * Release the native memory. <br />
+   * The NDArrays it depends on will NOT be disposed. <br />
+   * The object shall never be used after it is disposed.
+   */
+  def dispose(): Unit = {
+    if (!disposed) {
+      _LIB.mxNDArrayFree(handle)
+      dependencies.clear()
+      disposed = true
+    }
+  }
+
+  /**
+   * Dispose all NDArrays who help to construct this array. <br />
+   * e.g. (a * b + c).disposeDeps() will dispose a, b, c (including their deps) and a * b
+   * @return this array
+   */
+  def disposeDeps(): NDArray = {
+    disposeDepsExcept()
+  }
+
+  /**
+   * Dispose all NDArrays who help to construct this array, excepts those in the arguments. <br />
+   * e.g. (a * b + c).disposeDepsExcept(a, b)
+   * will dispose c and a * b.
+   * Note that a, b's dependencies will not be disposed either.
+   * @return this array
+   */
+  def disposeDepsExcept(arrs: NDArray*): NDArray = {
+    if (dependencies != null) {
+      val excepts = mutable.HashSet.empty[Long]
+      arrs.foreach { arr =>
+        excepts += arr.handle
+        excepts ++= arr.dependencies.keys
+      }
+      dependencies.retain { case (addr, weak) =>
+        if (excepts.contains(addr)) {
+          true
+        } else {
+          weak.get match {
+            case Some(arr) => arr.dispose()
+            case None =>
+          }
+          false
+        }
+      }
+    }
+    this
+  }
+
+  /**
+   * Peform an synchronize copy from the array.
+   * @param source The data source we should like to copy from.
+   */
+  private def syncCopyf
