@@ -697,4 +697,233 @@ class NDArray private[mxnet](private[mxnet] val handle: NDArrayHandle,
    * Peform an synchronize copy from the array.
    * @param source The data source we should like to copy from.
    */
-  private def syncCopyf
+  private def syncCopyfrom(source: Array[Float]): Unit = {
+    require(source.length == size, "array size do not match the size of NDArray")
+    checkCall(_LIB.mxNDArraySyncCopyFromCPU(handle, source, source.length))
+  }
+
+  /**
+   * Return a sliced NDArray that shares memory with current one.
+   * NDArray only support continuous slicing on axis 0
+   *
+   * @param start Starting index of slice.
+   * @param stop Finishing index of slice.
+   *
+   * @return a sliced NDArray that shares memory with current one.
+   */
+  def slice(start: Int, stop: Int): NDArray = {
+    val sliceHandle = new NDArrayHandleRef
+    checkCall(_LIB.mxNDArraySlice(handle, start, stop, sliceHandle))
+    new NDArray(handle = sliceHandle.value, writable = this.writable)
+  }
+
+  def slice(range: (Int, Int)): NDArray = {
+    slice(range._1, range._2)
+  }
+
+  /**
+   * Return a sliced NDArray at the ith position of axis0
+   * NDArray only support continuous slicing on axis 0
+   * @param i
+   * @return a sliced NDArray that shares memory with current one.
+   */
+  def slice(i: Int): NDArray = {
+    slice(i, i + 1)
+  }
+
+  /**
+   * Return a reshaped NDArray that shares memory with current one.
+   *
+   * @param dims New shape.
+   *
+   * @return a reshaped NDArray that shares memory with current one.
+   */
+  def reshape(dims: Array[Int]): NDArray = {
+    val reshapeHandle = new NDArrayHandleRef
+    checkCall(_LIB.mxNDArrayReshape(handle, dims.length, dims, reshapeHandle))
+    new NDArray(handle = reshapeHandle.value, writable = this.writable)
+  }
+
+  /**
+   * Block until all pending writes operations on current NDArray are finished.
+   * This function will return when all the pending writes to the current
+   * NDArray finishes. There can still be pending read going on when the
+   * function returns.
+   */
+  def waitToRead(): Unit = {
+    checkCall(_LIB.mxNDArrayWaitToRead(handle))
+  }
+
+  /**
+   * Get context of current NDArray.
+   * @return The context of current NDArray.
+   */
+  def context: Context = {
+    val devTypeId = new RefInt
+    val devId = new RefInt
+    checkCall(_LIB.mxNDArrayGetContext(handle, devTypeId, devId))
+    new Context(Context.devtype2str(devTypeId.value), devId.value)
+  }
+
+  /**
+   * Set the values of the NDArray
+   * @param value Value to set
+   * @return Current NDArray
+   */
+  def set(value: Float): NDArray = {
+    require(writable, "trying to assign to a readonly NDArray")
+    NDArray.invokeGenericFunc("_set_value", Array[Any](value), Map[String, Any]("out" -> this))
+    this
+  }
+
+  def set(other: NDArray): NDArray = {
+    require(writable, "trying to assign to a readonly NDArray")
+    other.copyTo(this)
+  }
+
+  def set(other: Array[Float]): NDArray = {
+    require(writable, "trying to assign to a readonly NDArray")
+    syncCopyfrom(other)
+    this
+  }
+
+  def +(other: NDArray): NDArray = {
+    NDArray.invokeBinaryFunc("_plus", this, other)
+  }
+
+  def +(other: Float): NDArray = {
+    NDArray.invokeGenericFunc("_plus_scalar", Array[Any](this, other))(0)
+  }
+
+  def +=(other: NDArray): NDArray = {
+    if (!writable) {
+      throw new IllegalArgumentException("trying to add to a readonly NDArray")
+    }
+    NDArray.invokeBinaryFunc("_plus", this, other, out = this)
+  }
+
+  def +=(other: Float): NDArray = {
+    if (!writable) {
+      throw new IllegalArgumentException("trying to add to a readonly NDArray")
+    }
+    NDArray.invokeGenericFunc("_plus_scalar", Array[Any](this, other),
+      Map[String, Any]("out" -> this))
+    this
+  }
+
+  def -(other: NDArray): NDArray = {
+    NDArray.invokeBinaryFunc("_minus", this, other)
+  }
+
+  def -(other: Float): NDArray = {
+    NDArray.invokeGenericFunc("_minus_scalar", Array[Any](this, other))(0)
+  }
+
+  def -=(other: NDArray): NDArray = {
+    if (!writable) {
+      throw new IllegalArgumentException("trying to subtract from a readonly NDArray")
+    }
+    NDArray.invokeBinaryFunc("_minus", this, other, out = this)
+  }
+
+  def -=(other: Float): NDArray = {
+    if (!writable) {
+      throw new IllegalArgumentException("trying to subtract from a readonly NDArray")
+    }
+    NDArray.invokeGenericFunc("_minus_scalar", Array[Any](this, other),
+      Map[String, Any]("out" -> this))
+    this
+  }
+
+  def *(other: NDArray): NDArray = {
+    NDArray.invokeBinaryFunc("_mul", this, other)
+  }
+
+  def *(other: Float): NDArray = {
+    NDArray.invokeGenericFunc("_mul_scalar", Array[Any](this, other))(0)
+  }
+
+  def unary_-(): NDArray = {
+    NDArray.invokeGenericFunc("_mul_scalar", Array[Any](this, -1f))(0)
+  }
+
+  def *=(other: NDArray): NDArray = {
+    if (!writable) {
+      throw new IllegalArgumentException("trying to multiply to a readonly NDArray")
+    }
+    NDArray.invokeBinaryFunc("_mul", this, other, out = this)
+  }
+
+  def *=(other: Float): NDArray = {
+    if (!writable) {
+      throw new IllegalArgumentException("trying to multiply to a readonly NDArray")
+    }
+    NDArray.invokeGenericFunc("_mul_scalar", Array[Any](this, other),
+      Map[String, Any]("out" -> this))
+    this
+  }
+
+  def /(other: NDArray): NDArray = {
+    NDArray.invokeBinaryFunc("_div", this, other)
+  }
+
+  def /(other: Float): NDArray = {
+    NDArray.invokeGenericFunc("_div_scalar", Array[Any](this, other))(0)
+  }
+
+  def /=(other: NDArray): NDArray = {
+    if (!writable) {
+      throw new IllegalArgumentException("trying to divide from a readonly NDArray")
+    }
+    NDArray.invokeBinaryFunc("_div", this, other, out = this)
+  }
+
+  def /=(other: Float): NDArray = {
+    if (!writable) {
+      throw new IllegalArgumentException("trying to divide from a readonly NDArray")
+    }
+    NDArray.invokeGenericFunc("_div_scalar", Array[Any](this, other),
+      Map[String, Any]("out" -> this))
+    this
+  }
+
+  /**
+   * Return a copied flat java array of current array (row-major).
+   * @return  A copy of array content.
+   */
+  def toArray: Array[Float] = {
+    val data = Array.ofDim[Float](size)
+    checkCall(_LIB.mxNDArraySyncCopyToCPU(handle, data, size))
+    data
+  }
+
+  /**
+   * Return a CPU scalar(float) of current ndarray.
+   * This ndarray must have shape (1,)
+   *
+   * @return The scalar representation of the ndarray.
+   */
+  def toScalar: Float = {
+    require(shape == Shape(1), "The current array is not a scalar")
+    this.toArray(0)
+  }
+
+  /**
+   * Copy the content of current array to other.
+   *
+   * @param other Target NDArray or context we want to copy data to.
+   * @return The copy target NDArray
+   */
+  def copyTo(other: NDArray): NDArray = {
+    if (other.handle == this.handle) {
+      NDArray.logger.warn("copy an array to itself, is it intended ?")
+      other
+    } else {
+      NDArray.invokeUnaryFunc("_copyto", this, out = other)
+    }
+  }
+
+  /**
+   * Copy the content of current array to a new NDArray in the context.
+   *
+   * @param ctx Target context we want to copy
