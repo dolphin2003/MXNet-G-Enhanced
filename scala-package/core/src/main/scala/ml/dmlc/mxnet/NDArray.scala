@@ -926,4 +926,79 @@ class NDArray private[mxnet](private[mxnet] val handle: NDArrayHandle,
   /**
    * Copy the content of current array to a new NDArray in the context.
    *
-   * @param ctx Target context we want to copy
+   * @param ctx Target context we want to copy data to.
+   * @return The copy target NDArray
+   */
+  def copyTo(ctx: Context): NDArray = {
+    val ret = new NDArray(NDArray.newAllocHandle(shape, ctx, delayAlloc = true))
+    copyTo(ret)
+  }
+
+  /**
+   * Clone the current array
+   * @return the copied NDArray in the same context
+   */
+  def copy(): NDArray = copyTo(this.context)
+
+  /**
+   * Get shape of current NDArray.
+   * @return an array representing shape of current ndarray
+   */
+  def shape: Shape = {
+    val ndim = new MXUintRef
+    val data = ArrayBuffer[Int]()
+    checkCall(_LIB.mxNDArrayGetShape(handle, ndim, data))
+    require(ndim.value == data.length, s"ndim=$ndim, while len(pdata)=${data.length}")
+    Shape(data)
+  }
+
+  // Get size of current NDArray.
+  def size: Int = shape.product
+
+  override def equals(o: Any): Boolean = o match {
+    case that: NDArray =>
+      that != null && that.shape == this.shape && that.toArray.sameElements(this.toArray)
+    case _ => false
+  }
+
+  override def hashCode: Int = {
+    // TODO: naive implementation
+    shape.hashCode + toArray.hashCode
+  }
+}
+// scalastyle:on finalize
+
+object NDArrayConversions {
+  implicit def int2Scalar(x: Int): NDArrayConversions = new NDArrayConversions(x.toFloat)
+  implicit def double2Scalar(x: Double): NDArrayConversions = new NDArrayConversions(x.toFloat)
+  implicit def float2Scalar(x: Float): NDArrayConversions = new NDArrayConversions(x)
+}
+
+class NDArrayConversions(val value: Float) {
+  def +(other: NDArray): NDArray = {
+    other + value
+  }
+
+  def -(other: NDArray): NDArray = {
+    NDArray.invokeGenericFunc("_rminus_scalar", Array[Any](other, value))(0)
+  }
+
+  def *(other: NDArray): NDArray = {
+    other * value
+  }
+
+  def /(other: NDArray): NDArray = {
+    NDArray.invokeGenericFunc("_rdiv_scalar", Array[Any](other, value))(0)
+  }
+}
+
+sealed class NDArrayFunction
+case class BinaryNDArrayFunction(handle: FunctionHandle,
+                                 acceptEmptyMutate: Boolean) extends NDArrayFunction
+case class UnaryNDArrayFunction(handle: FunctionHandle,
+                                acceptEmptyMutate: Boolean) extends NDArrayFunction
+case class GenericNDArrayFunction(handle: FunctionHandle,
+                                  acceptEmptyMutate: Boolean,
+                                  nMutateVars: Int,
+                                  useVarsRange: Range,
+                                  scalarRange: Range) extends NDArrayFunction
