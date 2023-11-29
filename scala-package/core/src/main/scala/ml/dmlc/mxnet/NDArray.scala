@@ -246,4 +246,254 @@ object NDArray {
    * One hot encoding indices into matrix out.
    * @param indices An NDArray containing indices of the categorical features.
    * @param out The result holder of the encoding.
- 
+   * @return Same as out.
+   */
+  def onehotEncode(indices: NDArray, out: NDArray): NDArray = {
+    NDArray.invokeBinaryFunc("_onehot_encode", indices, out, out)
+  }
+
+  /**
+   * Create an empty uninitialized new NDArray, with specified shape.
+   *
+   * @param shape shape of the NDArray.
+   * @param ctx The context of the NDArray, default to current default context.
+   *
+   * @return The created NDArray.
+   */
+  def empty(shape: Shape, ctx: Context = null): NDArray = {
+    val context = if (ctx == null) Context.defaultCtx else ctx
+    new NDArray(handle = NDArray.newAllocHandle(shape, context, delayAlloc = false))
+  }
+
+  def empty(shape: Int *): NDArray = empty(Shape(shape: _*))
+
+  def empty(ctx: Context, shape: Int *): NDArray = empty(Shape(shape: _*), ctx)
+
+  /**
+   * Create a new NDArray filled with 0, with specified shape.
+   *
+   * @param shape shape of the NDArray.
+   * @param ctx The context of the NDArray, default to current default context.
+   *
+   * @return The created NDArray.
+   */
+  def zeros(shape: Shape, ctx: Context = null): NDArray = {
+    val arr = empty(shape, ctx)
+    arr.set(0f)
+    arr
+  }
+
+  def zeros(shape: Int *): NDArray = zeros(Shape(shape: _*))
+
+  def zeros(ctx: Context, shape: Int *): NDArray = zeros(Shape(shape: _*), ctx)
+
+  /**
+   * Create a new NDArray filled with 1, with specified shape.
+   * @param shape shape of the NDArray.
+   * @param ctx The context of the NDArray, default to current default context.
+   * @return The created NDArray.
+   */
+  def ones(shape: Shape, ctx: Context = null): NDArray = {
+    val arr = empty(shape, ctx)
+    arr.set(1f)
+    arr
+  }
+
+  def ones(shape: Int *): NDArray = ones(Shape(shape: _*))
+
+  def ones(ctx: Context, shape: Int *): NDArray = ones(Shape(shape: _*), ctx)
+
+  /**
+   * Clip ndarray elements to range (from, to)
+   * @param array ndarray to be clipped
+   * @param min array min elements
+   * @param max array max elements
+   * @return a new clipped [[NDArray]]
+   */
+  def clip(array: NDArray, min: Float, max: Float): NDArray = {
+    NDArray.invokeGenericFunc("clip", Array(array, min, max))(0)
+  }
+
+  /**
+   * Take sqrt of the src
+   * @param src Source input to the function
+   * @return new [[NDArray]]
+   */
+  def sqrt(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("sqrt", src)
+  }
+
+  /**
+   * Take rsqrt of the src
+   * @param src Source input to the function
+   * @return new [[NDArray]]
+   */
+  def rsqrt(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("rsqrt", src)
+  }
+
+  /**
+   * Calculate 2D matrix multiplication
+   * @param lhs left ndarray
+   * @param rhs right ndarray
+   * @return a new [[NDArray]]
+   */
+  def dot(lhs: NDArray, rhs: NDArray): NDArray = {
+    NDArray.invokeBinaryFunc("dot", lhs, rhs)
+  }
+
+  /**
+   * Take L2 norm of the src.
+   * @param src Source input to the function
+   * @return a new [[NDArray]] of shape (1,) on the same device
+   */
+  def norm(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("norm", src)
+  }
+
+  /**
+   * Take absolute value of the src
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def abs(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("abs", src)
+  }
+
+  /**
+   * Take sign value of the src
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def sign(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("sign", src)
+  }
+
+  /**
+   * Take round value of the src
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def round(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("round", src)
+  }
+
+  /**
+   * Take ceil value of the src
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def ceil(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("ceil", src)
+  }
+
+  /**
+   * Take floor value of the src
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def floor(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("floor", src)
+  }
+
+  /**
+   * Take square of the src
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def square(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("square", src)
+  }
+
+  /**
+   * Take exp of the src
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def exp(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("exp", src)
+  }
+
+  /**
+   * Take log of the src
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def log(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("log", src)
+  }
+
+  /**
+   * Take cos of the src
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def cos(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("cos", src)
+  }
+
+  /**
+   * Take sin of the src
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def sin(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("sin", src)
+  }
+
+  /**
+   * Take max of the src. The result will be ndarray of shape (1,) on the same device.
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def max(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("max", src)
+  }
+
+  /**
+   * Take max of the src.The result will be ndarray of shape (1,) on the same device.
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def min(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("min", src)
+  }
+
+  /**
+   * Take sum of the src. The result will be ndarray of shape (1,) on the same device.
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def sum(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("sum", src)
+  }
+
+  /**
+   * Take the argmax index of each channel (row) in src.
+   * @param src Source ndarray
+   * @return a new [[NDArray]]
+   */
+  def argmaxChannel(src: NDArray): NDArray = {
+    NDArray.invokeUnaryFunc("argmax_channel", src)
+  }
+
+  /**
+   * Choose one element from each row in array according to the index.
+   * This function assume index uses 0-based index.
+   * @param array source array
+   * @param index index array
+   * @return a new [[NDArray]]
+   */
+  def chooseElement0Index(array: NDArray, index: NDArray): NDArray = {
+    NDArray.invokeBinaryFunc("choose_element_0index", array, index)
+  }
+
+  def randomUniform(low: Float, high: Float, out: NDArray): NDArray = {
+    require(out != null)
+    NDArray.invokeGenericFunc("_sample_uniform", kwargs = Map[String, Any](
+      "low" -> low, "high" -> high, "shape" -> out.shape, "out" -> out))(0)
+  }
+
+  def randomGaussian(loc: Float, scale: Float, out: NDArray): NDArray = {
+    require(out != null)
+    NDArray.invokeGenericFunc("_sample_normal", kwargs
