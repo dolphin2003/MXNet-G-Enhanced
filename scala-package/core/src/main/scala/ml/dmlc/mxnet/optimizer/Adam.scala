@@ -67,4 +67,51 @@ class Adam(val learningRate: Float = 0.002f, val beta1: Float = 0.9f, val beta2:
       (1.0 - math.pow(beta1, t1))).toFloat
     val beta1t = beta1 * math.pow(decayFactor, t1 - 1).toFloat
 
-    var res
+    var resdGrad = grad * rescaleGrad
+    if (clipGradient != 0f) {
+      val oldResdGrad = resdGrad
+      resdGrad = NDArray.clip(resdGrad, -clipGradient, clipGradient)
+      oldResdGrad.dispose()
+    }
+
+    val meanT = (beta1t * mean + (1.0 - beta1t) * resdGrad)
+      .disposeDepsExcept(mean, resdGrad)
+    val varianceT = (beta2 * variance + (1.0f - beta2) * resdGrad * resdGrad)
+      .disposeDepsExcept(variance, resdGrad)
+
+    val step = (learningRate * meanT / (NDArray.sqrt(varianceT) + epsilon))
+      .disposeDepsExcept(meanT, varianceT)
+
+    val wd = this.getWd(index, this.wd)
+    if (wd > 0.0f) {
+      val stepDelta = lr * wd * weight
+      step += stepDelta
+      stepDelta.dispose()
+    }
+
+    weight -= step
+    mean.set(meanT)
+    variance.set(varianceT)
+
+    meanT.dispose()
+    varianceT.dispose()
+    step.dispose()
+    resdGrad.dispose()
+  }
+
+  // Create additional optimizer state: mean, variance
+  override def createState(index: Int, weight: NDArray): (NDArray, NDArray) = {
+    timeFirstIndex = None // time is incremented only on the first index
+    (NDArray.zeros(weight.shape, weight.context), // mean
+      NDArray.zeros(weight.shape, weight.context)) // variance
+  }
+
+  // Dispose the state it created
+  override def disposeState(state: AnyRef): Unit = {
+    if (state != null) {
+      val (mean, variance) = state.asInstanceOf[(NDArray, NDArray)]
+      mean.dispose()
+      variance.dispose()
+    }
+  }
+}
