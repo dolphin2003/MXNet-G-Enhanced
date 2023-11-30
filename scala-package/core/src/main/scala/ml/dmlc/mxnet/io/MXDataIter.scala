@@ -116,4 +116,49 @@ class MXDataIter private[mxnet](private[mxnet] val handle: DataIterHandle,
    * Get the index of current batch
    * @return the index of current batch
    */
-  overr
+  override def getIndex(): IndexedSeq[Long] = {
+    val outIndex = new ListBuffer[Long]
+    val outSize = new RefLong
+    checkCall(_LIB.mxDataIterGetIndex(handle, outIndex, outSize))
+    outIndex.toIndexedSeq
+  }
+
+  /**
+   * get the number of padding examples
+   * in current batch
+   * @return number of padding examples in current batch
+   */
+  override def getPad(): MXUint = {
+    val out = new MXUintRef
+    checkCall(_LIB.mxDataIterGetPadNum(handle, out))
+    out.value
+  }
+
+  // The name and shape of data provided by this iterator
+  override def provideData: Map[String, Shape] = _provideData
+
+  // The name and shape of label provided by this iterator
+  override def provideLabel: Map[String, Shape] = _provideLabel
+
+  override def hasNext: Boolean = {
+    if (currentBatch != null) {
+      true
+    } else {
+      iterNext()
+    }
+  }
+
+  override def batchSize: Int = _batchSize
+}
+
+// scalastyle:on finalize
+class MXDataPack(val iterName: String,
+                 val params: Map[String, String]) extends DataPack {
+  /**
+    * get data iterator
+    * @return DataIter
+    */
+  override def iterator: DataIter = {
+    createIterator(iterName, params)
+  }
+}
