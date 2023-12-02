@@ -55,4 +55,22 @@ class ccSGD(val learningRate: Float = 0.01f, val momentum: Float = 0.0f,
       }) * lrScale.getOrElse(index, 1f)
 
     val wd = getWd(index, this.wd)
-    checkCall(_LIB.mxOptimizerUpdate(optHandl
+    checkCall(_LIB.mxOptimizerUpdate(optHandle.value, index, weight.handle, grad.handle, lr, wd))
+  }
+
+  // Create additional optimizer state such as momentum.
+  override def createState(index: Int, weight: NDArray): AnyRef = {
+    null
+  }
+
+  // Dispose the state it created
+  override def disposeState(state: AnyRef): Unit = {}
+
+  /**
+   * Free the optimizer handle.
+   * The object shall never be used after it is disposed.
+   */
+  def dispose(): Unit = {
+    checkCall(_LIB.mxOptimizerFree(optHandle.value))
+  }
+}
