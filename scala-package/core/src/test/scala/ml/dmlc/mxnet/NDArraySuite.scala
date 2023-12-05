@@ -256,4 +256,125 @@ class NDArraySuite extends FunSuite with BeforeAndAfterAll with Matchers {
 
   test("save and load with names") {
     val filename
-      = s"${System.getProperty("java.io.tmpdir")}/ndarray-${sequence.getAndInc
+      = s"${System.getProperty("java.io.tmpdir")}/ndarray-${sequence.getAndIncrement}.bin"
+    try {
+      val ndarray = NDArray.array(Array(1f, 2f, 3f), shape = Shape(3, 1))
+      NDArray.save(filename, Map("local" -> ndarray))
+      val (keys, arrays) = NDArray.load(filename)
+      assert(keys.length === 1)
+      assert(keys(0) === "local")
+      assert(arrays.length === 1)
+      val loadedArray = arrays(0)
+      assert(loadedArray.shape === Shape(3, 1))
+      assert(loadedArray.toArray === Array(1f, 2f, 3f))
+    } finally {
+      val file = new File(filename)
+      file.delete()
+    }
+  }
+
+  test("save and load without names") {
+    val filename
+      = s"${System.getProperty("java.io.tmpdir")}/ndarray-${sequence.getAndIncrement}.bin"
+    try {
+      val ndarray = NDArray.array(Array(1f, 2f, 3f), shape = Shape(3, 1))
+      NDArray.save(filename, Array(ndarray))
+      val (keys, arrays) = NDArray.load(filename)
+      assert(keys.length === 0)
+      assert(arrays.length === 1)
+      val loadedArray = arrays(0)
+      assert(loadedArray.shape === Shape(3, 1))
+      assert(loadedArray.toArray === Array(1f, 2f, 3f))
+    } finally {
+      val file = new File(filename)
+      file.delete()
+    }
+  }
+
+  test("get context") {
+    val ndarray = NDArray.ones(3, 2)
+    val ctx = ndarray.context
+    assert(ctx.deviceType === "cpu")
+    assert(ctx.deviceId === 0)
+  }
+
+  test("equals") {
+    val ndarray1 = NDArray.array(Array(1f, 2f, 3f), shape = Shape(3, 1))
+    val ndarray2 = NDArray.array(Array(1f, 2f, 3f), shape = Shape(3, 1))
+    val ndarray3 = NDArray.array(Array(1f, 2f, 3f), shape = Shape(1, 3))
+    val ndarray4 = NDArray.array(Array(3f, 2f, 3f), shape = Shape(3, 1))
+    ndarray1 shouldEqual ndarray2
+    ndarray1 shouldNot equal(ndarray3)
+    ndarray1 shouldNot equal(ndarray4)
+  }
+
+  test("slice") {
+    val arr = NDArray.array(Array(1f, 2f, 3f, 4f, 5f, 6f), shape = Shape(3, 2))
+
+    val arr1 = arr.slice(1)
+    assert(arr1.shape === Shape(1, 2))
+    assert(arr1.toArray === Array(3f, 4f))
+
+    val arr2 = arr.slice(1, 3)
+    assert(arr2.shape === Shape(2, 2))
+    assert(arr2.toArray === Array(3f, 4f, 5f, 6f))
+  }
+
+  test("reshape") {
+    val arr = NDArray.array(Array(1f, 2f, 3f, 4f, 5f, 6f), shape = Shape(3, 2))
+
+    val arr1 = arr.reshape(Array(2, 3))
+    assert(arr1.shape === Shape(2, 3))
+    assert(arr1.toArray === Array(1f, 2f, 3f, 4f, 5f, 6f))
+
+    arr.set(1f)
+    assert(arr1.toArray === Array(1f, 1f, 1f, 1f, 1f, 1f))
+  }
+
+  test("dispose deps") {
+    val arr1 = NDArray.ones(1, 2)
+    val arr2 = NDArray.ones(1, 2)
+    val arr3 = NDArray.ones(1, 2)
+
+    val arrWithDeps = (arr1 + arr2) + arr3
+    assert(arrWithDeps.dependencies.size === 4) // arr1 + arr2
+    assert(arrWithDeps.dependencies.contains(arr1.handle))
+    assert(arrWithDeps.dependencies.contains(arr2.handle))
+    assert(arrWithDeps.dependencies.contains(arr3.handle))
+    assert(!arr1.isDisposed)
+    assert(!arr2.isDisposed)
+    assert(!arr3.isDisposed)
+
+    val arrNoDeps = (arr1 + arr2 + arr3).disposeDeps()
+    assert(arrNoDeps.dependencies.isEmpty)
+    assert(arr1.isDisposed)
+    assert(arr2.isDisposed)
+    assert(arr3.isDisposed)
+  }
+
+  test("dispose deps except") {
+    val arr1 = NDArray.ones(1, 2)
+    val arr2 = NDArray.ones(1, 2)
+    val arr3 = NDArray.ones(1, 2)
+    val arr1_2 = arr1 + arr2
+
+    val arr = (arr1 + arr2 + arr1_2 + arr3).disposeDepsExcept(arr1_2)
+    // since arr1_2 depends on arr1 & arr2
+    // arr1 & arr2 will not be disposed either
+    assert(arr.dependencies.size === 3)
+    assert(arr.dependencies.contains(arr1.handle))
+    assert(arr.dependencies.contains(arr2.handle))
+    assert(arr.dependencies.contains(arr1_2.handle))
+    assert(!arr1.isDisposed)
+    assert(!arr2.isDisposed)
+    assert(!arr1_2.isDisposed)
+    assert(arr3.isDisposed)
+  }
+
+  test("serialize and deserialize") {
+    val arr = NDArray.ones(1, 2) * 3
+    val bytes = arr.serialize()
+    val arrCopy = NDArray.deserialize(bytes)
+    assert(arr === arrCopy)
+  }
+}
