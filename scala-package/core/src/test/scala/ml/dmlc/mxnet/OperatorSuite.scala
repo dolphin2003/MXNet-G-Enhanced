@@ -281,4 +281,194 @@ class OperatorSuite extends FunSuite with BeforeAndAfterAll
     val test = Symbol.sign()(data)()
     val exeTest = test.bind(Context.cpu(), args = Array(arrData), argsGrad = Array(arrGrad))
     exeTest.forward()
-    val out = exeTe
+    val out = exeTest.outputs.head
+    val npout = NDArray.sign(dataTmp)
+    assert(reldiff(out, npout) < 1e-6)
+
+    val outGrad = NDArray.ones(shape) * 2
+    exeTest.backward(outGrad)
+    arrGrad.toArray.foreach(elem => assert(elem === 0f +- 1e-3f))
+  }
+
+  test("round, ceil, floor") {
+    val data = Symbol.Variable("data")
+    val shape = Shape(3, 4)
+    val dataTmp = NDArray.ones(shape) * 5.543f
+    val arrData = dataTmp.copy()
+    val arrGrad = NDArray.ones(shape) * 2
+
+    val test = Symbol.round()(data)() + Symbol.ceil()(data)() + Symbol.floor()(data)()
+    val exeTest = test.bind(Context.cpu(), args = Array(arrData))
+    exeTest.forward()
+    val out = exeTest.outputs.head
+    val npout = NDArray.round(dataTmp) + NDArray.ceil(dataTmp) + NDArray.floor(dataTmp)
+    assert(reldiff(out, npout) < 1e-6)
+  }
+
+  test("rsqrt, cos, sin") {
+    val data = Symbol.Variable("data")
+    val shape = Shape(3, 4)
+    val dataTmp = NDArray.ones(shape) * 5
+    val arrData = dataTmp.copy()
+    val arrGrad = NDArray.ones(shape) * 3
+
+    val test = Symbol.rsqrt()(data)() + Symbol.cos()(data)() + Symbol.sin()(data)()
+    val exeTest = test.bind(Context.cpu(), args = Array(arrData), argsGrad = Array(arrGrad))
+    exeTest.forward()
+    val out = exeTest.outputs.head
+    val npout = {
+      import ml.dmlc.mxnet.NDArrayConversions._
+      1 / NDArray.sqrt(dataTmp) + NDArray.cos(dataTmp) + NDArray.sin(dataTmp)
+    }
+    assert(reldiff(out, npout) < 1e-6)
+
+    val outGrad = NDArray.ones(shape) * 2
+    val npoutGrad = {
+      import ml.dmlc.mxnet.NDArrayConversions._
+      outGrad * -(1 / (2 * dataTmp * NDArray.sqrt(dataTmp))) +
+        outGrad * -1 * NDArray.sin(dataTmp) + outGrad * NDArray.cos(dataTmp)
+    }
+    exeTest.backward(outGrad)
+    assert(reldiff(arrGrad, npoutGrad) < 1e-6)
+  }
+
+  test("maximum") {
+    val data1 = Symbol.Variable("data")
+    val data2 = Symbol.Variable("data")
+    val shape = Shape(3, 4)
+    val dataTmp1 = Random.uniform(0, 100, shape)
+    val dataTmp2 = Random.uniform(0, 100, shape)
+
+    val arrData1 = dataTmp1.copy()
+    val arrData2 = dataTmp2.copy()
+
+    val test = Symbol.max(data1, data2)
+    val exeTest = test.bind(Context.cpu(), args = Array(arrData1, arrData2))
+    exeTest.forward()
+    val out = exeTest.outputs.head
+    val expected = (dataTmp1.toArray zip dataTmp2.toArray).map { case (a, b) => Math.max(a, b) }
+    assert(reldiff(out.toArray, expected) < 1e-6)
+  }
+
+  test("minimum") {
+    val data1 = Symbol.Variable("data")
+    val data2 = Symbol.Variable("data")
+    val shape = Shape(3, 4)
+    val dataTmp1 = Random.uniform(0, 100, shape)
+    val dataTmp2 = Random.uniform(0, 100, shape)
+
+    val arrData1 = dataTmp1.copy()
+    val arrData2 = dataTmp2.copy()
+
+    val test = Symbol.min(data1, data2)
+    val exeTest = test.bind(Context.cpu(), args = Array(arrData1, arrData2))
+    exeTest.forward()
+    val out = exeTest.outputs.head
+    val expected = (dataTmp1.toArray zip dataTmp2.toArray).map { case (a, b) => Math.min(a, b) }
+    assert(reldiff(out.toArray, expected) < 1e-6)
+  }
+
+  test("transpose") {
+    val data = Symbol.Variable("data")
+    val test = Symbol.transpose()(data)()
+
+    val shape = Shape(3, 4)
+    val ctx = Context.cpu()
+    val arrData = Random.uniform(0, 100, shape, ctx)
+
+    val trans: Array[Float] = {
+      val tmp = arrData.toArray.toList.grouped(4).toList
+      for (i <- 0 until 4) yield {
+        List(tmp(0)(i), tmp(1)(i), tmp(2)(i))
+      }
+    }.flatten.toArray
+
+    val exeTest = test.bind(ctx, args = Map("data" -> arrData))
+    exeTest.forward(isTrain = false)
+    val out = exeTest.outputs.head
+
+    assert(out.shape == Shape(4, 3))
+    assert(reldiff(out.toArray, trans) < 1e-6)
+  }
+
+  test("smooth_l1 & makeloss") {
+    val data = Symbol.Variable("data")
+    val smoothL1 = Symbol.smooth_l1()()(Map("data" -> data, "scalar" -> 1.0f))
+    val loss = Symbol.MakeLoss()()(Map("data" -> smoothL1))
+
+    val shape = Shape(2, 6)
+    val ctx = Context.cpu()
+    val input = NDArray.empty(ctx, shape.toArray: _*)
+    val grad = NDArray.empty(ctx, shape.toArray: _*)
+    val array = Array[Float](
+        -3.5f, -2.5f, -1.5f, -0.5f, -0.3f, -0.1f,
+        0.1f, 0.3f, 0.5f, 1.5f, 2.5f, 3.5f)
+    input.set(array)
+
+    val arrTmp = Array[Float](
+        3.0f, 2.0f, 1.0f, 0.125f, 0.045f, 0.005f,
+        0.005f, 0.045f, 0.125f, 1.0f, 2.0f, 3.0f)
+    val gradTmp = Array[Float](
+        -1.0f, -1.0f, -1.0f, -0.5f, -0.3f, -0.1f,
+        0.1f, 0.3f, 0.5f, 1.0f, 1.0f, 1.0f)
+
+    val exeTest =
+      loss.bind(ctx, args = Map("data" -> input), argsGrad = Map("data" -> grad))
+    exeTest.forward(isTrain = true)
+    val out = exeTest.outputs.head
+
+    assert(reldiff(out.toArray, arrTmp) < 1e-6)
+
+    exeTest.backward()
+
+    assert(reldiff(grad.toArray, gradTmp) < 1e-6)
+  }
+
+  test("maximum minimum scalar") {
+    val data = Symbol.Variable("data")
+    val shape = Shape(3, 4)
+    val dataTmp = NDArray.ones(shape) * 2
+
+    val arrData = dataTmp.copy()
+
+    val test = Symbol.max(data, 3) + Symbol.max(9, data) + Symbol.min(5, data) + Symbol.min(data, 4)
+    val exeTest = test.bind(Context.cpu(), args = Array(arrData))
+    exeTest.forward()
+    val out = exeTest.outputs.head
+    // 3 + 9 + 2 + 2
+    assert(reldiff(out, NDArray.ones(shape) * 16) < 1e-6)
+  }
+
+  test("abs") {
+    val data = Symbol.Variable("data")
+    val shape = Shape(3, 4)
+    val dataTmp = NDArray.ones(shape) * 5
+    val arrData = dataTmp.copy()
+    val arrGrad = NDArray.ones(shape) * 3
+
+    val test = Symbol.abs()(data)()
+    val exeTest = test.bind(Context.cpu(), args = Array(arrData), argsGrad = Array(arrGrad))
+    exeTest.forward()
+    val out = exeTest.outputs.head
+    val npout = NDArray.abs(dataTmp)
+    assert(reldiff(out, npout) < 1e-6)
+
+    val outGrad = NDArray.ones(shape) * 2
+    val npoutGrad = outGrad * NDArray.sign(dataTmp)
+    exeTest.backward(outGrad)
+    assert(reldiff(arrGrad, npoutGrad) < 1e-6)
+  }
+
+  // configure A: input --> conv --> deconv --> output.
+  // the convolution and deconvoluiton has similar parameter which ensure
+  // the input shape is the same as output, and the same weights between conv
+  // and deconv;
+  // If the input value of forward() and backwrad() is the same, then
+  // the output value of them should also the same;
+  private def checkDeconvolutionForwardBackward(inputShape: Shape,
+                                                numFilter: Int,
+                                                kernel: (Int, Int),
+                                                stride: (Int, Int),
+                                                pad: (Int, Int)): Unit = {
+    require(inputShape(1) == numFilter)
+    val data = Sy
