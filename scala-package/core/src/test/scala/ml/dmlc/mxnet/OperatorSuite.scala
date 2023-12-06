@@ -635,4 +635,70 @@ class OperatorSuite extends FunSuite with BeforeAndAfterAll
                                    expected: Seq[NDArray],
                                    checkEps: Float = 1e-5f): Unit = {
     val arrData = location.map(_.copy())
-    val arrGrad = location.m
+    val arrGrad = location.map(array => NDArray.empty(array.shape))
+
+    val executor = sym.bind(Context.cpu(), args = arrData, argsGrad = arrGrad)
+
+    val inps = executor.argArrays
+    assert(inps.size === location.size,
+      s"Executor argArrays and and location len do not match." +
+      s"Got ${inps.size} inputs and ${location.size} locations")
+
+    for ((inp, source) <- location zip executor.argArrays) {
+      source.set(inp)
+    }
+    for (g <- executor.gradArrays) {
+      if (g != null) {
+        g.set(0f)
+      }
+    }
+
+    assert(executor.outputs.length === 1)
+
+    executor.forward()
+
+    for ((expect, output) <- expected zip executor.outputs) {
+      assert(reldiff(expect, output) <= checkEps)
+    }
+  }
+
+  /**
+   * Compare backwards call to expected value.
+   * @param sym output symbol
+   * @param location list of numpy arrays corresponding to sym.list_arguments
+   * @param grad list of numpy arrays corresponding to sym.outputs for incoming gradient
+   * @param expected list of arrays corresponding to sym.outputs
+   * @param checkEps relative error to check to
+   */
+  private def checkSymbolicBackward(sym: Symbol,
+                                    location: Seq[NDArray],
+                                    grad: Seq[NDArray],
+                                    expected: Seq[NDArray],
+                                    checkEps: Float = 1e-5f): Unit = {
+    val arrData = location.map(_.copy())
+    val arrGrad = location.map(array => NDArray.empty(array.shape))
+    val outGrad = grad.map(_.copy()).toArray
+
+    val executor = sym.bind(Context.cpu(), args = arrData, argsGrad = arrGrad)
+
+    val inps = executor.argArrays
+    assert(inps.size === location.size,
+      s"Executor argArrays and and location len do not match." +
+        s"Got ${inps.size} inputs and ${location.size} locations")
+    for ((inp, source) <- location zip executor.argArrays) {
+      source.set(inp)
+    }
+    for (g <- executor.gradArrays) {
+      if (g != null) {
+        g.set(0f)
+      }
+    }
+
+    executor.forward()
+    executor.backward(outGrad)
+
+    for ((expect, grad) <- expected zip executor.gradArrays) {
+      assert(reldiff(expect, grad) <= checkEps)
+    }
+  }
+}
