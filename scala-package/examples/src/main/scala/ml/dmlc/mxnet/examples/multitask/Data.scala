@@ -16,4 +16,19 @@ object Data {
       "image" -> s"$dataPath/train-images-idx3-ubyte",
       "label" -> s"$dataPath/train-labels-idx1-ubyte",
       "input_shape" -> inputShape.toString(),
-      "batch_size" -> s"$batchSi
+      "batch_size" -> s"$batchSize",
+      "shuffle" -> "True",
+      "flat" -> flat
+    )
+    val trainDataIter = IO.MNISTIter(trainParams)
+    val testParams = Map(
+      "image" -> s"$dataPath/t10k-images-idx3-ubyte",
+      "label" -> s"$dataPath/t10k-labels-idx1-ubyte",
+      "input_shape" -> inputShape.toString(),
+      "batch_size" -> s"$batchSize",
+      "flat" -> flat
+    )
+    val testDataIter = IO.MNISTIter(testParams)
+    (trainDataIter, testDataIter)
+  }
+}
