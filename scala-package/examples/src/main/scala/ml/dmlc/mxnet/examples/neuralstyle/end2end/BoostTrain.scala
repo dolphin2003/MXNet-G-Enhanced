@@ -79,4 +79,113 @@ object BoostTrain {
       loss.setParams(extraArgs)
       var gradArray = Array[NDArray]()
       for (i <- 0 until styleArray.length) {
-        gradArray = gradArray :+ (NDArray.ones(Shape(1), ctx) * (styleWeight / gScale(i
+        gradArray = gradArray :+ (NDArray.ones(Shape(1), ctx) * (styleWeight / gScale(i)))
+      }
+      gradArray = gradArray :+ (NDArray.ones(Shape(1), ctx) * contentWeight)
+
+      // generator
+      val gens = Array(
+          GenV4.getModule("g0", dShape, ctx),
+          GenV3.getModule("g1", dShape, ctx),
+          GenV3.getModule("g2", dShape, ctx),
+          GenV4.getModule("g3", dShape, ctx)
+      )
+      gens.foreach { gen =>
+        val opt = new SGD(learningRate = 1e-4f,
+                          momentum = 0.9f,
+                          wd = 5e-3f,
+                          clipGradient = 5f)
+        gen.initOptimizer(opt)
+      }
+
+      var filelist = new File(stin.dataPath).list().toList
+      val numImage = filelist.length
+      logger.info(s"Dataset size: $numImage")
+
+      val tvWeight = 1e-2f
+
+      val startEpoch = 0
+      val endEpoch = 3
+
+      for (k <- 0 until gens.length) {
+        val path = new File(s"${stin.saveModelPath}/$k")
+        if (!path.exists()) path.mkdir()
+      }
+
+      // train
+      for (i <- startEpoch until endEpoch) {
+        filelist = Random.shuffle(filelist)
+        for (idx <- filelist.indices) {
+          var dataArray = Array[NDArray]()
+          var lossGradArray = Array[NDArray]()
+          val data =
+            DataProcessing.preprocessContentImage(s"${stin.dataPath}/${filelist(idx)}", dShape, ctx)
+          dataArray = dataArray :+ data
+          // get content
+          contentMod.forward(Array(data))
+          // set target content
+          loss.setParams(Map("target_content" -> contentMod.getOutputs()(0)))
+          // gen_forward
+          for (k <- 0 until gens.length) {
+            gens(k).forward(dataArray.takeRight(1))
+            dataArray = dataArray :+ gens(k).getOutputs()(0)
+            // loss forward
+            loss.forward(dataArray.takeRight(1))
+            loss.backward(gradArray)
+            lossGradArray = lossGradArray :+ loss.getInputGrads()(0)
+          }
+          val grad = NDArray.zeros(data.shape, ctx)
+          for (k <- gens.length - 1 to 0 by -1) {
+            val tvGradExecutor = getTvGradExecutor(gens(k).getOutputs()(0), ctx, tvWeight)
+            tvGradExecutor.forward()
+            grad += lossGradArray(k) + tvGradExecutor.outputs(0)
+            val gNorm = NDArray.norm(grad)
+            if (gNorm.toScalar > clipNorm) {
+              grad *= clipNorm / gNorm.toScalar
+            }
+            gens(k).backward(Array(grad))
+            gens(k).update()
+            gNorm.dispose()
+            tvGradExecutor.dispose()
+          }
+          grad.dispose()
+          if (idx % 20 == 0) {
+            logger.info(s"Epoch $i: Image $idx")
+            for (k <- 0 until gens.length) {
+              val n = NDArray.norm(gens(k).getInputGrads()(0))
+              logger.info(s"Data Norm : ${n.toScalar / dShape.product}")
+              n.dispose()
+            }
+          }
+          if (idx % 1000 == 0) {
+            for (k <- 0 until gens.length) {
+              gens(k).saveParams(
+                  s"${stin.saveModelPath}/$k/${modelPrefix}_" +
+                  s"${"%04d".format(i)}-${"%07d".format(idx)}.params")
+            }
+          }
+          data.dispose()
+        }
+      }
+    } catch {
+      case ex: Exception => {
+        logger.error(ex.getMessage, ex)
+        parser.printUsage(System.err)
+        sys.exit(1)
+      }
+    }
+  }
+}
+
+class BoostTrain {
+  @Option(name = "--data-path", usage = "the input train data path")
+  private val dataPath: String = null
+  @Option(name = "--vgg--model-path", usage = "the pretrained model to use: ['vgg']")
+  private val vggModelPath: String = null
+  @Option(name = "--save--model-path", usage = "the save model path")
+  private val saveModelPath: String = null
+  @Option(name = "--style-image", usage = "the style image")
+  private val styleImage: String = null
+  @Option(name = "--gpu", usage = "which gpu card to use, default is -1, means using cpu")
+  private val gpu: Int = -1
+}
