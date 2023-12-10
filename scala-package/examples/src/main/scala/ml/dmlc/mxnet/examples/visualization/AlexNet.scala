@@ -40,4 +40,16 @@ object AlexNet {
     // stage 4
     val flatten = Symbol.Flatten()()(Map("data" -> pool3))
     val fc1 = Symbol.FullyConnected()()(Map("data" -> flatten, "num_hidden" -> 4096))
-    val relu6 = Symbol.Activation()(
+    val relu6 = Symbol.Activation()()(Map("data" -> fc1, "act_type" -> "relu"))
+    val dropout1 = Symbol.Dropout()()(Map("data" -> relu6, "p" -> 0.5f))
+    // stage 5
+    val fc2 = Symbol.FullyConnected()()(Map("data" -> dropout1, "num_hidden" -> 4096))
+    val relu7 = Symbol.Activation()()(Map("data" -> fc2, "act_type" -> "relu"))
+    val dropout2 = Symbol.Dropout()()(Map("data" -> relu7, "p" -> 0.5f))
+    // stage 6
+    val fc3 = Symbol.FullyConnected()()(
+        Map("data" -> dropout2, "num_hidden" -> numClasses))
+    val softmax = Symbol.SoftmaxOutput("softmax")()(Map("data" -> fc3))
+    softmax
+  }
+}
