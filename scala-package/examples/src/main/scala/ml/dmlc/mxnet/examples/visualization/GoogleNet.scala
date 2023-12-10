@@ -67,4 +67,11 @@ object GoogleNet {
         "stride" -> "(2, 2)", "pool_type" -> "max"))
     val in5a = InceptionFactory(pool5, 256, 160, 320, 32, 128, "max", 128, name = "in5a")
     val in5b = InceptionFactory(in5a, 384, 192, 384, 48, 128, "max", 128, name = "in5b")
-    va
+    val pool6 = Symbol.Pooling()()(Map("data" -> in5b, "kernel" -> "(7, 7)",
+        "stride" -> "(1,1)", "pool_type" -> "avg"))
+    val flatten = Symbol.Flatten()()(Map("data" -> pool6))
+    val fc1 = Symbol.FullyConnected()()(Map("data" -> flatten, "num_hidden" -> numClasses))
+    val softmax = Symbol.SoftmaxOutput("softmax")()(Map("data" -> fc1))
+    softmax
+  }
+}
