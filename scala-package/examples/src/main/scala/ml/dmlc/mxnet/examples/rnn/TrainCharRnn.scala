@@ -141,4 +141,20 @@ object TrainCharRnn {
       }
       executor.dispose()
     } catch {
-      ca
+      case ex: Exception => {
+        logger.error(ex.getMessage, ex)
+        parser.printUsage(System.err)
+        sys.exit(1)
+      }
+    }
+  }
+}
+
+class TrainCharRnn {
+  @Option(name = "--data-path", usage = "the input train data file")
+  private val dataPath: String = null
+  @Option(name = "--save-model-path", usage = "the model saving path")
+  private val saveModelPath: String = null
+  @Option(name = "--gpu", usage = "which gpu card to use, default is -1, means using cpu")
+  private val gpu: Int = -1
+}
