@@ -48,4 +48,41 @@ object TestCharRnn {
       // generate a sequence of 1200 chars
       val seqLength = 1200
       val inputNdarray = NDArray.zeros(1)
-      val revertVocab = Utils.makeRevertVoca
+      val revertVocab = Utils.makeRevertVocab(vocab)
+
+      // Feel free to change the starter sentence
+      var output = stcr.starterSentence
+      val randomSample = true
+      var newSentence = true
+      val ignoreLength = output.length()
+
+      for (i <- 0 until seqLength) {
+        if (i <= ignoreLength - 1) Utils.makeInput(output(i), vocab, inputNdarray)
+        else Utils.makeInput(output.takeRight(1)(0), vocab, inputNdarray)
+        val prob = model.forward(inputNdarray, newSentence)
+        newSentence = false
+        val nextChar = Utils.makeOutput(prob, revertVocab, randomSample)
+        if (nextChar == "") newSentence = true
+        if (i >= ignoreLength) output = output ++ nextChar
+      }
+
+      // Let's see what we can learned from char in Obama's speech.
+      logger.info(output)
+    } catch {
+      case ex: Exception => {
+        logger.error(ex.getMessage, ex)
+        parser.printUsage(System.err)
+        sys.exit(1)
+      }
+    }
+  }
+}
+
+class TestCharRnn {
+  @Option(name = "--data-path", usage = "the input train data file")
+  private val dataPath: String = null
+  @Option(name = "--model-prefix", usage = "the model prefix")
+  private val modelPrefix: String = null
+  @Option(name = "--starter-sentence", usage = "the starter sentence")
+  private val starterSentence: String = null
+}
