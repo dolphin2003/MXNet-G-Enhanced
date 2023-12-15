@@ -1,3 +1,4 @@
+
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -5,23 +6,23 @@
   <modelVersion>4.0.0</modelVersion>
   <parent>
     <groupId>ml.dmlc.mxnet</groupId>
-    <artifactId>mxnet-scala-init-native-parent</artifactId>
+    <artifactId>mxnet-scala-native-parent</artifactId>
     <version>0.1.2-SNAPSHOT</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
 
   <groupId>ml.dmlc.mxnet</groupId>
-  <artifactId>libmxnet-init-scala-osx-x86_64</artifactId>
+  <artifactId>libmxnet-scala-linux-x86_64-cpu</artifactId>
   <version>0.1.2-SNAPSHOT</version>
-  <name>MXNet Scala Package - Initializer Native OSX-x86_64</name>
+  <name>MXNet Scala Package - Native Linux-x86_64 CPU-only</name>
   <url>http://maven.apache.org</url>
 
-  <packaging>jnilib</packaging>
+  <packaging>so</packaging>
 
   <dependencies>
     <dependency>
       <groupId>ml.dmlc.mxnet</groupId>
-      <artifactId>mxnet-init_${scala.binary.version}</artifactId>
+      <artifactId>mxnet-core_${scala.binary.version}</artifactId>
       <version>${project.version}</version>
       <type>jar</type>
       <scope>compile</scope>
@@ -41,7 +42,7 @@
         <extensions>true</extensions>
         <configuration>
           <!--  trigger javah -->
-          <javahOS>darwin</javahOS>
+          <javahOS>linux</javahOS>
           <compilerProvider>generic-classic</compilerProvider>
           <compilerExecutable>${cxx}</compilerExecutable>
           <linkerExecutable>${cxx}</linkerExecutable>
@@ -49,7 +50,7 @@
             <source>
               <directory>../src/main/native</directory>
               <fileNames>
-                <fileName>ml_dmlc_mxnet_init_native_c_api.cc</fileName>
+                <fileName>ml_dmlc_mxnet_native_c_api.cc</fileName>
               </fileNames>
             </source>
           </sources>
@@ -64,14 +65,14 @@
             <linkerStartOption>-shared</linkerStartOption>
           </linkerStartOptions>
           <linkerMiddleOptions>
-            <linkerMiddleOption>-framework JavaVM</linkerMiddleOption>
-            <linkerMiddleOption>-Wl,-exported_symbol,_Java_*</linkerMiddleOption>
-            <linkerMiddleOption>-Wl,-x</linkerMiddleOption>
+            <linkerMiddleOption>-Wl,--whole-archive</linkerMiddleOption>
             <linkerMiddleOption>${lddeps}</linkerMiddleOption>
-            <linkerMiddleOption>-force_load ../../../lib/libmxnet.a</linkerMiddleOption>
+            <linkerMiddleOption>../../../lib/libmxnet.a</linkerMiddleOption>
+            <linkerMiddleOption>-Wl,--no-whole-archive</linkerMiddleOption>
           </linkerMiddleOptions>
           <linkerEndOptions>
             <linkerEndOption>${ldflags}</linkerEndOption>
+            <linkerEndOption>-fopenmp</linkerEndOption>
           </linkerEndOptions>
         </configuration>
 
@@ -80,13 +81,13 @@
             <id>javah</id>
             <phase>generate-sources</phase>
             <configuration>
-              <javahOS>darwin</javahOS>
+              <javahOS>linux</javahOS>
               <javahProvider>default</javahProvider>
               <javahOutputDirectory>${project.build.directory}/custom-javah</javahOutputDirectory>
               <workingDirectory>${basedir}</workingDirectory>
-              <javahOutputFileName>ml_dmlc_mxnet_init_native_c_api.h</javahOutputFileName>
+              <javahOutputFileName>ml_dmlc_mxnet_native_c_api.h</javahOutputFileName>
               <javahClassNames>
-                <javahClassName>ml.dmlc.mxnet.init.LibInfo</javahClassName>
+                <javahClassName>ml.dmlc.mxnet.LibInfo</javahClassName>
               </javahClassNames>
             </configuration>
             <goals>
