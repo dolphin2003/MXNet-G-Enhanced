@@ -128,4 +128,13 @@ char* MXRtc::compile(const std::string& name, const std::string& code) {
     CHECK_EQ(compile_res, NVRTC_SUCCESS) << log;
 
     size_t ptx_size;
-    CHECK_EQ(nvrtcGet
+    CHECK_EQ(nvrtcGetPTXSize(prog, &ptx_size), NVRTC_SUCCESS);
+    char *ptx = new char[ptx_size];
+    CHECK_EQ(nvrtcGetPTX(prog, ptx), NVRTC_SUCCESS);
+    CHECK_EQ(nvrtcDestroyProgram(&prog), NVRTC_SUCCESS);
+    return ptx;
+}
+
+}  // namespace mxnet
+
+#endif  // ((MXNET_USE_CUDA) && (MXNET_USE_NVRTC))
