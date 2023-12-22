@@ -197,4 +197,197 @@ ThreadedOpr* ThreadedEngine::NewOperator(
 //  std::cout << "---------------begin----------------" << std::endl;
 //  for(auto var : ret->const_vars) {
 //	  std::cout << var->ready_to_read() << std::endl;
-// 
+//  }
+//  std::cout << "---------------end----------------" << std::endl;
+  std::transform(mutable_vars.begin(), mutable_vars.end(),
+                 ret->mutable_vars.begin(), ThreadedVar::CastFromBase);
+  if (ENGINE_DEBUG != 0) {
+    CheckDuplicate(const_vars, mutable_vars);
+  }
+  return ret;
+}
+
+void ThreadedEngine::CheckDuplicate(std::vector<VarHandle> const& const_vars,
+                                    std::vector<VarHandle> const& mutable_vars) {
+  // Check for duplicates.
+  auto use = const_vars;
+  auto mutate = mutable_vars;
+  auto use_size = use.size();
+  auto mutate_size = mutate.size();
+  std::sort(use.begin(), use.end());
+  std::sort(mutate.begin(), mutate.end());
+  for (std::size_t i = 0; i < use_size; ++i) {
+    if (i != 0 && use.at(i) == use.at(i - 1)) {
+      LOG(FATAL) << "duplicate items found in `const_vars`";
+    }
+  }
+  for (std::size_t i = 0; i < mutate_size; ++i) {
+    if (i != 0 && mutate.at(i) == mutate.at(i - 1)) {
+      LOG(FATAL) << "duplicate items found in `mutable_vars`";
+    }
+  }
+  std::size_t j = 0;
+  for (std::size_t i = 0; i < use_size; ++i) {
+    while (j < mutate_size && mutate.at(j) < use.at(i)) {
+      ++j;
+    }
+    if (j == mutate_size) {
+      break;
+    }
+    if (mutate.at(j) == use.at(i)) {
+      LOG(FATAL)
+          << "duplicate items found between `const_vars` and `mutable_vars`";
+    }
+  }
+}
+
+void ThreadedEngine::DeleteOperator(OprHandle op) {
+  ThreadedOpr* threaded_opr = ThreadedOpr::CastFromBase(op);
+  std::vector<VarHandle> deps;
+  deps.reserve(threaded_opr->const_vars.size() +
+               threaded_opr->mutable_vars.size());
+  deps.insert(deps.end(),
+              threaded_opr->const_vars.begin(),
+              threaded_opr->const_vars.end());
+  deps.insert(deps.end(),
+              threaded_opr->mutable_vars.begin(),
+              threaded_opr->mutable_vars.end());
+  this->PushSync([threaded_opr](RunContext) {
+      ThreadedOpr::Delete(threaded_opr);
+    }, Context::CPU(), {}, deps, FnProperty::kAsync);
+}
+
+void ThreadedEngine::Push(OprHandle op, Context exec_ctx, int priority) {
+  ThreadedOpr* threaded_opr = ThreadedOpr::CastFromBase(op);
+  OprBlock* opr_block = OprBlock::New();
+  opr_block->opr = threaded_opr;
+
+  opr_block->wait.store(static_cast<int>(
+      threaded_opr->const_vars.size() +
+      threaded_opr->mutable_vars.size() + 1));
+  opr_block->ctx = exec_ctx;
+  opr_block->priority = priority;
+  ++pending_;
+  // Add read dependencies.
+  for (auto&& i : threaded_opr->const_vars) {
+    i->AppendReadDependency(opr_block);
+  }
+  // Add write dependencies.
+  for (auto&& i : threaded_opr->mutable_vars) {
+    i->AppendWriteDependency(opr_block);
+  }
+  if (opr_block->decr_wait() == 0) {
+    this->PushToExecute(opr_block, true);
+  }
+}
+
+void ThreadedEngine::PushAsync(AsyncFn fn, Context exec_ctx,
+                               std::vector<VarHandle> const& const_vars,
+                               std::vector<VarHandle> const& mutable_vars,
+                               FnProperty prop, int priority) {
+  ThreadedOpr *opr = NewOperator(fn, const_vars, mutable_vars, prop);
+  opr->temporary = true;
+  Push(opr, exec_ctx, priority);
+}
+
+void ThreadedEngine::DeleteVariable(SyncFn delete_fn,
+                                    Context exec_ctx,
+                                    VarHandle var) {
+  ThreadedVar* threaded_var = ThreadedVar::CastFromBase(var);
+  this->PushSync([delete_fn, threaded_var](RunContext ctx) {
+      // Mark variable as orphan,
+      // so during `ThreadedEngine::OnComplete` it could be recycled.
+      threaded_var->SetToDelete();
+      delete_fn(ctx);
+    }, exec_ctx, {}, {var}, FnProperty::kAsync);
+}
+
+void ThreadedEngine::WaitForVar(VarHandle var) {
+  ThreadedVar* threaded_var = ThreadedVar::CastFromBase(var);
+  if (threaded_var->ready_to_read()) return;
+  if (engine_info_) {
+    LOG(INFO) << "Wait for " << threaded_var;
+    debug_wait_var_ = threaded_var;
+  }
+  std::atomic<bool> done{false};
+  this->PushSync([this, &done](RunContext) {
+      if (engine_info_) {
+        LOG(INFO) << "Sync is executed";
+      }
+      {
+        std::unique_lock<std::mutex> lock{finished_m_};
+        done.store(true);
+      }
+      finished_cv_.notify_all();
+      if (engine_info_) {
+        LOG(INFO) << "Sync is notified";
+      }
+    }, Context::CPU(), {var}, {}, FnProperty::kNormal);
+  {
+    std::unique_lock<std::mutex> lock{finished_m_};
+    finished_cv_.wait(lock, [this, &done]() {
+        return done.load() || kill_.load();
+      });
+  }
+}
+
+void ThreadedEngine::WaitForAll() {
+  std::unique_lock<std::mutex> lock{finished_m_};
+  finished_cv_.wait(lock, [this]() {
+      return pending_.load() == 0 || kill_.load();
+    });
+}
+
+inline void ThreadedEngine::OnComplete(ThreadedOpr* threaded_opr) {
+  // Mark complete for read variables
+  for (auto&& i : threaded_opr->const_vars) {
+    i->CompleteReadDependency([this](OprBlock* opr) {
+        this->PushToExecute(opr, false);
+      });
+  }
+  // Mark complete for write variables.
+  for (auto&& i : threaded_opr->mutable_vars) {
+    bool debug_info = (engine_info_ && debug_wait_var_ == i);
+    if (debug_info) {
+      LOG(INFO) << "Complete write dep for " << i;
+    }
+    bool to_delete = i->CompleteWriteDependency(
+        [this, debug_info](OprBlock* opr) {
+          if (debug_info) {
+            LOG(INFO) << "PushToExecute " << opr;
+            debug_push_opr_ = opr;
+          }
+          this->PushToExecute(opr, false);
+          if (debug_info) {
+            LOG(INFO) << "Fin PushToExecute " << opr;
+          }
+        });
+    if (to_delete) {
+      ThreadedVar::Delete(i);
+    }
+  }
+  int npending;
+  {
+    std::unique_lock<std::mutex> lock{finished_m_};
+    npending = --pending_;
+  }
+  CHECK_GE(npending, 0);
+  if (npending == 0) {
+    // no need to grab lock when notify.
+    finished_cv_.notify_all();
+  }
+
+  // delte operator if it is temperory
+  if (threaded_opr->temporary) {
+    ThreadedOpr::Delete(threaded_opr);
+  }
+}
+
+void ThreadedEngine::OnCompleteStatic(
+    Engine *engine, void *threaded_opr) {
+  static_cast<ThreadedEngine*>(engine)->OnComplete(
+      static_cast<ThreadedOpr*>(threaded_opr));
+}
+
+}  // namespace engine
+}  // namespace mxnet
