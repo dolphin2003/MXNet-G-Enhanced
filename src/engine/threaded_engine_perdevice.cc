@@ -187,3 +187,4 @@ Engine *CreateThreadedEnginePerDevice() {
   return new ThreadedEnginePerDevice();
 }
 }  // namespace engine
+}  // namespace mxnet
