@@ -147,4 +147,104 @@ class MNISTIter: public IIterator<TBlobBatch> {
       stdimg->Seek(stdimg->Tell() + start * image_rows * image_cols);
     }
 
-    img_.shape_ = mshadow::Shape3(image_count,
+    img_.shape_ = mshadow::Shape3(image_count, image_rows, image_cols);
+    img_.stride_ = img_.size(2);
+
+    // allocate continuous memory
+    img_.dptr_ = new float[img_.MSize()];
+    for (int i = 0; i < image_count; ++i) {
+      for (int j = 0; j < image_rows; ++j) {
+        for (int k = 0; k < image_cols; ++k) {
+          unsigned char ch;
+          CHECK(stdimg->Read(&ch, sizeof(ch) != 0));
+          img_[i][j][k] = ch;
+        }
+      }
+    }
+    // normalize to 0-1
+    img_ *= 1.0f / 256.0f;
+    delete stdimg;
+  }
+  inline void LoadLabel(void) {
+    dmlc::SeekStream* stdlabel
+        = dmlc::SeekStream::CreateForRead(param_.label.c_str());
+    ReadInt(stdlabel);
+    int labels_count = ReadInt(stdlabel);
+
+    int start, end;
+    GetPart(labels_count, &start, &end);
+    labels_count = end - start;
+    if (start > 0) {
+      stdlabel->Seek(stdlabel->Tell() + start);
+    }
+
+    labels_.resize(labels_count);
+    for (int i = 0; i < labels_count; ++i) {
+      unsigned char ch;
+      CHECK(stdlabel->Read(&ch, sizeof(ch) != 0));
+      labels_[i] = ch;
+      inst_.push_back((unsigned)i + inst_offset_);
+    }
+    delete stdlabel;
+  }
+  inline void Shuffle(void) {
+    std::shuffle(inst_.begin(), inst_.end(), common::RANDOM_ENGINE(kRandMagic + param_.seed));
+    std::vector<float> tmplabel(labels_.size());
+    mshadow::TensorContainer<cpu, 3> tmpimg(img_.shape_);
+    for (size_t i = 0; i < inst_.size(); ++i) {
+      unsigned ridx = inst_[i] - inst_offset_;
+      mshadow::Copy(tmpimg[i], img_[ridx]);
+      tmplabel[i] = labels_[ridx];
+    }
+    // copy back
+    mshadow::Copy(img_, tmpimg);
+    labels_ = tmplabel;
+  }
+
+ private:
+  inline static int ReadInt(dmlc::Stream *fi) {
+    unsigned char buf[4];
+    CHECK(fi->Read(buf, sizeof(buf)) == sizeof(buf))
+        << "invalid mnist format";
+#ifdef _MSC_VER
+    return (buf[0] << 24 | buf[1] << 16 | buf[2] << 8 | buf[3]);
+#else
+    return reinterpret_cast<int>(buf[0] << 24 | buf[1] << 16 | buf[2] << 8 | buf[3]);
+#endif
+  }
+
+ private:
+  /*! \brief MNIST iter params */
+  MNISTParam param_;
+  /*! \brief output */
+  TBlobBatch out_;
+  /*! \brief current location */
+  index_t loc_;
+  /*! \brief image content */
+  mshadow::Tensor<cpu, 3> img_;
+  /*! \brief label content */
+  std::vector<float> labels_;
+  /*! \brief batch data tensor */
+  mshadow::Tensor<cpu, 4> batch_data_;
+  /*! \brief batch label tensor  */
+  mshadow::Tensor<cpu, 2> batch_label_;
+  /*! \brief instance index offset */
+  unsigned inst_offset_;
+  /*! \brief instance index */
+  std::vector<unsigned> inst_;
+  // magic number to setup randomness
+  static const int kRandMagic = 0;
+};  // class MNISTIter
+
+DMLC_REGISTER_PARAMETER(MNISTParam);
+
+MXNET_REGISTER_IO_ITER(MNISTIter)
+.describe("Create iterator for MNIST hand-written digit number recognition dataset.")
+.add_arguments(MNISTParam::__FIELDS__())
+.add_arguments(PrefetcherParam::__FIELDS__())
+.set_body([]() {
+    return new PrefetcherIter(new MNISTIter());
+  });
+
+}  // namespace io
+}  // namespace mxnet
