@@ -139,4 +139,19 @@ struct TBlobBatch {
        this is used to indicate the last elements in the batch are only padded up to match the batch, and should be discarded */
   mshadow::index_t num_batch_padd;
   /*! \brief content of dense data */
-  std::ve
+  std::vector<TBlob> data;
+  /*! \brief extra data to be fed to the network */
+  std::string extra_data;
+  /*! \brief constructor */
+  TBlobBatch(void) {
+    inst_index = NULL;
+    batch_size = 0; num_batch_padd = 0;
+  }
+  /*! \brief destructor */
+  ~TBlobBatch() {
+    delete inst_index;
+  }
+};  // struct TBlobBatch
+}  // namespace io
+}  // namespace mxnet
+#endif  // MXNET_IO_INST_VECTOR_H_
