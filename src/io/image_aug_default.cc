@@ -233,4 +233,82 @@ class DefaultImageAugmenter : public ImageAugmenter {
     if (param_.max_crop_size != -1 || param_.min_crop_size != -1) {
       CHECK(res.cols >= param_.max_crop_size && res.rows >= \
               param_.max_crop_size && param_.max_crop_size >= param_.min_crop_size)
-          << "input image size smaller 
+          << "input image size smaller than max_crop_size";
+      index_t rand_crop_size =
+          std::uniform_int_distribution<index_t>(param_.min_crop_size, param_.max_crop_size)(*prnd);
+      index_t y = res.rows - rand_crop_size;
+      index_t x = res.cols - rand_crop_size;
+      if (param_.rand_crop != 0) {
+        y = std::uniform_int_distribution<index_t>(0, y)(*prnd);
+        x = std::uniform_int_distribution<index_t>(0, x)(*prnd);
+      } else {
+        y /= 2; x /= 2;
+      }
+      cv::Rect roi(x, y, rand_crop_size, rand_crop_size);
+      int interpolation_method = GetInterMethod(param_.inter_method, rand_crop_size, rand_crop_size,
+                                                param_.data_shape[2], param_.data_shape[1], prnd);
+      cv::resize(res(roi), res, cv::Size(param_.data_shape[2], param_.data_shape[1])
+                , 0, 0, interpolation_method);
+    } else {
+      CHECK(static_cast<index_t>(res.rows) >= param_.data_shape[1]
+            && static_cast<index_t>(res.cols) >= param_.data_shape[2])
+          << "input image size smaller than input shape";
+      index_t y = res.rows - param_.data_shape[1];
+      index_t x = res.cols - param_.data_shape[2];
+      if (param_.rand_crop != 0) {
+        y = std::uniform_int_distribution<index_t>(0, y)(*prnd);
+        x = std::uniform_int_distribution<index_t>(0, x)(*prnd);
+      } else {
+        y /= 2; x /= 2;
+      }
+      cv::Rect roi(x, y, param_.data_shape[2], param_.data_shape[1]);
+      res = res(roi);
+    }
+
+    // color space augmentation
+    if (param_.random_h != 0 || param_.random_s != 0 || param_.random_l != 0) {
+      std::uniform_real_distribution<float> rand_uniform(0, 1);
+      cvtColor(res, res, CV_BGR2HLS);
+      int h = rand_uniform(*prnd) * param_.random_h * 2 - param_.random_h;
+      int s = rand_uniform(*prnd) * param_.random_s * 2 - param_.random_s;
+      int l = rand_uniform(*prnd) * param_.random_l * 2 - param_.random_l;
+      int temp[3] = {h, l, s};
+      int limit[3] = {180, 255, 255};
+      for (int i = 0; i < res.rows; ++i) {
+        for (int j = 0; j < res.cols; ++j) {
+          for (int k = 0; k < 3; ++k) {
+            int v = res.at<cv::Vec3b>(i, j)[k];
+            v += temp[k];
+            v = std::max(0, std::min(limit[k], v));
+            res.at<cv::Vec3b>(i, j)[k] = v;
+          }
+        }
+      }
+      cvtColor(res, res, CV_HLS2BGR);
+    }
+    return res;
+  }
+
+ private:
+  // temporal space
+  cv::Mat temp_;
+  // rotation param
+  cv::Mat rotateM_;
+  // parameters
+  DefaultImageAugmentParam param_;
+  /*! \brief list of possible rotate angle */
+  std::vector<int> rotate_list_;
+};
+
+ImageAugmenter* ImageAugmenter::Create(const std::string& name) {
+  return dmlc::Registry<ImageAugmenterReg>::Find(name)->body();
+}
+
+MXNET_REGISTER_IMAGE_AUGMENTER(aug_default)
+.describe("default augmenter")
+.set_body([]() {
+    return new DefaultImageAugmenter();
+  });
+#endif  // MXNET_USE_OPENCV
+}  // namespace io
+}  // namespace mxnet
