@@ -153,4 +153,183 @@ class KVStoreDist : public KVStoreLocal {
     const auto& watch_nodes = ps::Postoffice::Get()->GetNodeIDs(node_id);
     std::unordered_set<int> watch_set(watch_nodes.begin(), watch_nodes.end());
     for (int r : dead_nodes) {
-      if (watch_set.find(r) != 
+      if (watch_set.find(r) != watch_set.end()) number++;
+    }
+    return number;
+  }
+
+  void RunServer(const Controller& controller) override {
+    CHECK(!IsWorkerNode());
+    if (IsServerNode()) {
+      server_ = new KVStoreDistServer();
+      server_->set_controller(controller);
+    }
+
+    ps::StartAsync("mxnet_server\0");
+    if (!ps::Postoffice::Get()->is_recovery()) {
+      ps::Postoffice::Get()->Barrier(
+        ps::kWorkerGroup + ps::kServerGroup + ps::kScheduler);
+    }
+    if (server_) server_->Run();
+    ps::Finalize();
+    if (server_) {
+      delete server_;
+    }
+    server_ = nullptr;
+  }
+
+ private:
+  void Push_(const std::vector<int>& keys,
+             const std::vector<NDArray>& values,
+             int priority,
+             bool do_merge)  {
+    // first aggregate the values over keys
+    std::vector<int> uniq_keys;
+    std::vector<std::vector<NDArray> > grouped_vals;
+    GroupKVPairs(keys, values, &uniq_keys, &grouped_vals);
+
+    for (size_t i = 0; i < uniq_keys.size(); ++i) {
+      // merge over devcies
+      int key = uniq_keys[i];
+      const auto& vals = grouped_vals[i];
+      NDArray merged = do_merge ? comm_->Reduce(key, vals, priority) : vals[0];
+
+      auto& send_buf = comm_buf_[key];
+      if (merged.ctx().dev_mask() == cpu::kDevMask) {
+        send_buf = merged;  // avoid memory copy
+      } else {
+        if (send_buf.is_none()) {
+          send_buf = NDArray(merged.shape(), pinned_ctx_);
+        }
+        CopyFromTo(merged, &send_buf);
+      }
+
+      // push to servers
+      size_t size = send_buf.shape().Size();
+      real_t* data = static_cast<real_t*>(send_buf.data().dptr_);
+      auto push_to_servers =
+          [this, key, data, size](RunContext rctx, Engine::CallbackOnComplete cb) {
+         // convert to ps keys
+        PSKV& pskv = EncodeKey(key, size);
+
+        // do push. false means no delete
+        ps::SArray<real_t> vals(data, size, false);
+        CHECK_NOTNULL(ps_worker_)->ZPush(
+        pskv.keys, vals, pskv.lens, 0, [cb]() { cb(); });
+      };
+//      std::cout << "---------------begin---------------" << std::endl;
+//      ThreadedVar* threadvar = static_cast<ThreadedVar*>(send_buf.var());
+//      std::cout << threadvar->is_ready_to_read() << std::endl;
+//      std::cout << "---------------end---------------" << std::endl;
+      Engine::Get()->PushAsync(
+          push_to_servers,
+          pinned_ctx_,
+          {send_buf.var()},
+          {},
+          FnProperty::kNormal, priority);
+    }
+  }
+
+  /**
+   * \brief check if the keys are all unique
+   */
+  void CheckUnique(const std::vector<int>& keys) {
+    auto keys_copy = keys;
+    auto last = std::unique(keys_copy.begin(), keys_copy.end());
+    CHECK_EQ(static_cast<size_t>(std::distance(keys_copy.begin(), last)),
+             static_cast<size_t>(keys.size()));
+  }
+
+  /**
+   * \brief struct for ps keys and lens
+   */
+  struct PSKV {
+    ps::SArray<ps::Key> keys;  // n keys
+    ps::SArray<int> lens;  // the length of the i-th value
+    int size;
+  };
+
+  /**
+   * \brief cache all key partitions
+   */
+  std::unordered_map<int, PSKV> ps_kv_;
+
+  /**
+   * \brief serizelize EncodeKey
+   */
+  std::mutex mu_;
+
+  /**
+   * \brief convert to keys in ps
+   */
+  inline PSKV& EncodeKey(int key, size_t size) {
+    mu_.lock();
+    PSKV& pskv = ps_kv_[key];
+    mu_.unlock();
+
+    int parameter_partition_num = ps::Postoffice::Get()->num_parameter_partition(); //yegeyan 2016.12.9
+
+    if (!pskv.keys.empty()) {
+      CHECK_EQ(static_cast<size_t>(pskv.size), size) << "The value size cannot be changed";
+    } else {
+      auto krs = ps::Postoffice::Get()->GetServerKeyRanges();
+      int num_servers = krs.size();
+      CHECK_GT(num_servers, 0);
+
+      if (parameter_partition_num >= 0) { //yegeyan 2016.12.9
+          ps::Key ps_key = key;
+          pskv.keys.push_back(ps_key);
+          pskv.lens.push_back(size);
+          pskv.size = size;
+      }
+      else {
+          // a simple heuristic for load balance
+          if (size < bigarray_bound_) {
+            // send it to a single random picked server
+            int server = (key * 9973) % num_servers;
+            ps::Key ps_key = krs[server].begin() + key;
+            CHECK_LT(ps_key, krs[server].end());
+            pskv.keys.push_back(ps_key);
+            pskv.lens.push_back(size);
+            pskv.size = size;
+          } else {
+            // parition it to all servers
+            pskv.size = 0;
+            for (int i = 0; i < num_servers; ++i) {
+              size_t part_size =
+                  static_cast<size_t>(static_cast<double>(size)/num_servers*(i+1)) -
+                  static_cast<size_t>(static_cast<double>(size)/num_servers*i);
+              ps::Key ps_key = krs[i].begin() + key;
+              CHECK_LT(ps_key, krs[i].end());
+              pskv.keys.push_back(ps_key);
+              pskv.lens.push_back(part_size);
+              pskv.size += part_size;
+            }
+            CHECK_EQ(static_cast<size_t>(pskv.size), size);
+          }
+      }
+    }
+    return pskv;
+  }
+
+  /**
+   * \brief for worker to push and pull data
+   */
+  ps::KVWorker<real_t>* ps_worker_;
+  /**
+   * \brief the server handle
+   */
+  KVStoreDistServer* server_;
+  /**
+   * \brief threshold for partition
+   */
+  size_t bigarray_bound_;
+  /// \brief send & recver buffer
+  std::unordered_map<int, NDArray> comm_buf_;
+};
+
+}  // namespace kvstore
+}  // namespace mxnet
+
+
+#endif  // MXNET_KVSTORE_KVSTORE_DIST_H_
