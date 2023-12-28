@@ -307,4 +307,197 @@ void CopyFromTo(const NDArray &from, NDArray *to, int priority) {
         ndarray::Copy<cpu, cpu>(from.data(), &tmp,
                                 from.ctx(), ret.ctx(), ctx);
       }, from.ctx(), const_vars, {ret.var()},
-      FnProperty::kNormal, priority)
+      FnProperty::kNormal, priority);
+  } else {
+#if MXNET_USE_CUDA
+    if (a == cpu::kDevMask && b == gpu::kDevMask) {
+      Engine::Get()->PushSync([from, ret](RunContext ctx) {
+          ret.CheckAndAlloc();
+          TBlob tmp = ret.data();
+          ndarray::Copy<cpu, gpu>(from.data(), &tmp,
+                                  from.ctx(), ret.ctx(), ctx);
+          // Wait GPU kernel to complete
+          ctx.get_stream<gpu>()->Wait();
+        }, ret.ctx(), const_vars, {ret.var()},
+        FnProperty::kCopyToGPU, priority);
+    } else if (a == gpu::kDevMask && b == cpu::kDevMask) {
+      Engine::Get()->PushSync([from, ret](RunContext ctx) {
+          ret.CheckAndAlloc();
+          TBlob tmp = ret.data();
+          ndarray::Copy<gpu, cpu>(from.data(), &tmp,
+                                  from.ctx(), ret.ctx(), ctx);
+          // Wait GPU kernel to complete
+          ctx.get_stream<gpu>()->Wait();
+        }, from.ctx(), const_vars, {ret.var()},
+        FnProperty::kCopyFromGPU, priority);
+    } else if (a == gpu::kDevMask && b == gpu::kDevMask) {
+      Engine::Get()->PushSync([from, ret](RunContext ctx) {
+          ret.CheckAndAlloc();
+          TBlob tmp = ret.data();
+          ndarray::Copy<gpu, gpu>(from.data(), &tmp,
+                                  from.ctx(), ret.ctx(), ctx);
+          // Wait GPU kernel to complete
+          ctx.get_stream<gpu>()->Wait();
+        }, from.ctx(), const_vars, {ret.var()},
+        FnProperty::kCopyFromGPU, priority);
+    } else {
+      LOG(FATAL) << "unknown device mask";
+    }
+#else
+    LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
+#endif
+  }
+}
+
+void ElementwiseSum(const std::vector<NDArray> &source, NDArray *out, int priority) {
+  std::vector<Engine::VarHandle> const_vars;
+  const_vars.reserve(source.size());
+  for (size_t i = 0; i < source.size(); ++i) {
+    if (source[i].var() != out->var()) {
+      const_vars.push_back(source[i].var());
+    }
+    CHECK_EQ(source[i].shape() , out->shape())
+        << "operands shape mismatch";
+    if (out->ctx().dev_mask() == cpu::kDevMask) {
+      CHECK_EQ(source[i].ctx().dev_mask(),  cpu::kDevMask)
+          << "operands context mismatch";
+    } else {
+      CHECK(source[i].ctx() == out->ctx())
+          << "operands context mismatch";
+    }
+  }
+  // important: callback must always capture by value
+  NDArray ret = *out;
+
+  switch (out->ctx().dev_mask()) {
+    case cpu::kDevMask: {
+      Engine::Get()->PushSync([source, ret](RunContext ctx) {
+          std::vector<TBlob> source_tblob(source.size());
+          for (size_t i = 0; i < source.size(); ++i) {
+            source_tblob[i] = source[i].data();
+          }
+          ret.CheckAndAlloc();
+          TBlob tmp = ret.data();
+          ndarray::ElementwiseSum<cpu>(source_tblob, &tmp, ctx);
+        }, out->ctx(), const_vars, {ret.var()},
+        FnProperty::kNormal, priority);
+      break;
+    }
+#if MXNET_USE_CUDA
+    case gpu::kDevMask: {
+      Engine::Get()->PushSync([source, ret](RunContext ctx) {
+          std::vector<TBlob> source_tblob(source.size());
+          for (size_t i = 0; i < source.size(); ++i) {
+            source_tblob[i] = source[i].data();
+          }
+          ret.CheckAndAlloc();
+          TBlob tmp = ret.data();
+          ndarray::ElementwiseSum<gpu>(source_tblob, &tmp, ctx);
+          // Wait GPU kernel to complete
+          ctx.get_stream<gpu>()->Wait();
+        }, out->ctx(), const_vars, {ret.var()},
+        FnProperty::kNormal, priority);
+      break;
+    }
+#endif
+    default: LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
+  }
+}
+
+void ClipOp(const NDArray &src,
+            const real_t &a_min, const real_t &a_max,
+            NDArray *out) {
+  if (out->is_none()) {
+    *out = NDArray(src.shape(), src.ctx(), true, src.dtype());
+  } else {
+    CHECK(out->ctx() == src.ctx()) << "target context mismatch";
+    CHECK(out->shape() == src.shape()) << "target shape mismatch";
+  }
+  NDArray ret = *out;
+  std::vector<Engine::VarHandle> const_vars;
+  if (src.var() != ret.var()) const_vars.push_back(src.var());
+  switch (src.ctx().dev_mask()) {
+    case cpu::kDevMask: {
+      Engine::Get()->PushSync([src, a_min, a_max, ret](RunContext ctx) {
+          ret.CheckAndAlloc();
+          TBlob tmp = ret.data();
+          ndarray::EvalClip<cpu>(src.data(), a_min, a_max, &tmp, ctx);
+        }, src.ctx(), const_vars, {ret.var()});
+      break;
+    }
+    #if MXNET_USE_CUDA
+    case gpu::kDevMask: {
+      Engine::Get()->PushSync([src, a_min, a_max, ret](RunContext ctx) {
+          ret.CheckAndAlloc();
+          TBlob tmp = ret.data();
+          ndarray::EvalClip<gpu>(src.data(), a_min, a_max, &tmp, ctx);
+        }, src.ctx(), const_vars, {ret.var()});
+      break;
+    }
+    #endif
+    default: LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
+  }
+}
+
+inline void CopyFromToSimple(const NDArray &from, NDArray *to) {
+  CopyFromTo(from, to, 0);
+}
+
+template<typename Distribution>
+void SampleOP(const real_t &a,
+              const real_t &b,
+              NDArray *out) {
+  CHECK(!out->is_none());
+  Resource resource = ResourceManager::Get()->Request(
+      out->ctx(), ResourceRequest::kRandom);
+  // important: callback must always capture by value
+  NDArray ret = *out;
+  // redirect everything to mshadow operations
+  switch (out->ctx().dev_mask()) {
+    case cpu::kDevMask: {
+      Engine::Get()->PushSync([a, b, resource, ret](RunContext ctx) {
+          ret.CheckAndAlloc();
+          TBlob tmp = ret.data();
+          ndarray::EvalRandom<cpu, Distribution>(a, b, resource, &tmp, ctx);
+        }, out->ctx(), {}, {ret.var(), resource.var});
+      break;
+    }
+#if MXNET_USE_CUDA
+    case gpu::kDevMask: {
+      Engine::Get()->PushSync([a, b, resource, ret](RunContext ctx) {
+          ret.CheckAndAlloc();
+          TBlob tmp = ret.data();
+          ndarray::EvalRandom<gpu, Distribution>(a, b, resource, &tmp, ctx);
+          // Wait GPU kernel to complete
+          ctx.get_stream<gpu>()->Wait();
+        }, out->ctx(), {}, {ret.var(), resource.var});
+      break;
+    }
+#endif
+    default: LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
+  }
+}
+
+void SampleUniform(real_t begin, real_t end, NDArray *out) {
+  SampleOP<ndarray::UniformDistribution>(begin, end, out);
+}
+
+void SampleGaussian(real_t mu, real_t sigma, NDArray *out) {
+  SampleOP<ndarray::GaussianDistribution>(mu, sigma, out);
+}
+
+void RandomSeed(uint32_t seed) {
+  ResourceManager::Get()->SeedRandom(seed);
+}
+
+template<typename OP>
+inline NDArray BinaryOpRet(const NDArray &lhs,
+                           const NDArray &rhs) {
+  NDArray ret;
+  BinaryOp<OP>(lhs, rhs, &ret);
+  return ret;
+}
+
+template<typename OP, bool reverse>
+inline NDArray ScalarOpRet(const NDArray &lhs,
+                           const real_t &rh
