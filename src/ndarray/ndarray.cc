@@ -500,4 +500,216 @@ inline NDArray BinaryOpRet(const NDArray &lhs,
 
 template<typename OP, bool reverse>
 inline NDArray ScalarOpRet(const NDArray &lhs,
-                           const real_t &rh
+                           const real_t &rhs) {
+  NDArray ret;
+  ScalarOp<OP, reverse>(lhs, rhs, &ret);
+  return ret;
+}
+
+template<typename OP>
+inline NDArray &BinaryOpApply(NDArray *dst,
+                              const NDArray &src) {
+  BinaryOp<OP>(*dst, src, dst);
+  return *dst;
+}
+
+template<typename OP>
+inline NDArray &ScalarOpApply(NDArray *dst,
+                             const real_t &src) {
+  ScalarOp<OP, false>(*dst, src, dst);
+  return *dst;
+}
+
+// Binary
+NDArray operator+(const NDArray &lhs, const NDArray &rhs) {
+  return BinaryOpRet<ndarray::Plus>(lhs, rhs);
+}
+NDArray operator-(const NDArray &lhs, const NDArray &rhs) {
+  return BinaryOpRet<ndarray::Minus>(lhs, rhs);
+}
+NDArray operator*(const NDArray &lhs, const NDArray &rhs) {
+  return BinaryOpRet<ndarray::Mul>(lhs, rhs);
+}
+NDArray operator/(const NDArray &lhs, const NDArray &rhs) {
+  return BinaryOpRet<ndarray::Div>(lhs, rhs);
+}
+// Scalar
+NDArray operator+(const NDArray &lhs, const real_t &rhs) {
+  return ScalarOpRet<ndarray::Plus, false>(lhs, rhs);
+}
+NDArray operator-(const NDArray &lhs, const real_t &rhs) {
+  return ScalarOpRet<ndarray::Minus, false>(lhs, rhs);
+}
+NDArray operator*(const NDArray &lhs, const real_t &rhs) {
+  return ScalarOpRet<ndarray::Mul, false>(lhs, rhs);
+}
+NDArray operator/(const NDArray &lhs, const real_t &rhs) {
+  return ScalarOpRet<ndarray::Div, false>(lhs, rhs);
+}
+
+// Binary
+NDArray &NDArray::operator=(real_t scalar) {
+  SetValueOp(scalar, this);
+  return *this;
+}
+
+NDArray &NDArray::operator+=(const NDArray &src) {
+  return BinaryOpApply<ndarray::Plus>(this, src);
+}
+NDArray &NDArray::operator-=(const NDArray &src) {
+  return BinaryOpApply<ndarray::Minus>(this, src);
+}
+NDArray &NDArray::operator*=(const NDArray &src) {
+  return BinaryOpApply<ndarray::Mul>(this, src);
+}
+NDArray &NDArray::operator/=(const NDArray &src) {
+  return BinaryOpApply<ndarray::Div>(this, src);
+}
+// Scalar
+NDArray &NDArray::operator+=(const real_t &src) {
+  return ScalarOpApply<ndarray::Plus>(this, src);
+}
+NDArray &NDArray::operator-=(const real_t &src) {
+  return ScalarOpApply<ndarray::Minus>(this, src);
+}
+NDArray &NDArray::operator*=(const real_t &src) {
+  return ScalarOpApply<ndarray::Mul>(this, src);
+}
+NDArray &NDArray::operator/=(const real_t &src) {
+  return ScalarOpApply<ndarray::Div>(this, src);
+}
+
+/*!
+ * \brief Get a broadcasted NDArray
+ * \param src the source ndarray
+ * \param dim dimension to broadcast
+ * \param size size after broadcasting
+ */
+void Broadcast(const NDArray& src, int dim, int size, NDArray *out) {
+  CHECK(0 <= dim && dim < static_cast<int>(src.shape().ndim()))
+      << "Broadcast dimension out of bound.";
+  CHECK(src.shape()[dim] == 1) << "Cannot broadcast a dimension that is not 1.";
+  TShape new_shape = src.shape();
+  new_shape[dim] = size;
+  if (out->is_none()) {
+    *out = NDArray(new_shape, src.ctx(), true, src.dtype());
+  } else {
+    CHECK(out->ctx() == src.ctx()) << "target context mismatch";
+    CHECK(out->shape() == new_shape)
+      << "invalid target shape: " << out->shape() << " should be: " << new_shape;
+  }
+  std::vector<Engine::VarHandle> const_vars;
+  const_vars.push_back(src.var());
+  size_t before = src.shape().ProdShape(0, dim);
+  size_t after = src.shape().ProdShape(dim + 1, src.shape().ndim());
+
+  // important: callback must always capture by value
+  NDArray ret = *out;
+  switch (src.ctx().dev_mask()) {
+    case cpu::kDevMask: {
+      Engine::Get()->PushSync([src, ret, before, size, after](RunContext ctx) {
+          ret.CheckAndAlloc();
+          NDArray inter_in = src.Reshape(mshadow::Shape2(before, after));
+          NDArray inter_out = ret.Reshape(mshadow::Shape3(before, size, after));
+          TBlob tmp = inter_out.data();
+          ndarray::EvalBroadcast<cpu>(inter_in.data(), &tmp, size, ctx);
+      }, src.ctx(), const_vars, {ret.var()});
+      break;
+    }
+#if MXNET_USE_CUDA
+    case gpu::kDevMask: {
+      Engine::Get()->PushSync([src, ret, before, size, after](RunContext ctx) {
+          ret.CheckAndAlloc();
+          NDArray inter_in = src.Reshape(mshadow::Shape2(before, after));
+          NDArray inter_out = ret.Reshape(mshadow::Shape3(before, size, after));
+          TBlob tmp = inter_out.data();
+          ndarray::EvalBroadcast<gpu>(inter_in.data(), &tmp, size, ctx);
+          // Wait GPU kernel to complete
+          ctx.get_stream<gpu>()->Wait();
+      }, src.ctx(), const_vars, {ret.var()});
+      break;
+    }
+#endif
+    default: LOG(FATAL) << MXNET_GPU_NOT_ENABLED_ERROR;
+  }
+}
+
+void NDArray::Save(dmlc::Stream *strm) const {
+  // save shape
+  shape_.Save(strm);
+  if (is_none()) return;
+  // save context
+  Context ctx = this->ctx();
+  ctx.Save(strm);
+  TBlob save_data;
+  NDArray temp;
+  if (ctx.dev_mask() != cpu::kDevMask) {
+    temp = this->Copy(Context::CPU());
+    temp.WaitToRead();
+    save_data = temp.data();
+  } else {
+    this->WaitToRead();
+    save_data = this->data();
+  }
+  // save type flag
+  int32_t type_flag = save_data.type_flag_;
+  strm->Write(&type_flag, sizeof(type_flag));
+  CHECK(save_data.CheckContiguous());
+  size_t type_size = mshadow::mshadow_sizeof(type_flag);
+  strm->Write(save_data.dptr_, type_size * shape_.Size());
+}
+
+bool NDArray::Load(dmlc::Stream *strm) {
+  // load shape
+  TShape shape;
+  if (!shape.Load(strm)) return false;
+  if (shape.ndim() == 0) {
+    *this = NDArray(); return true;
+  }
+  // load context
+  Context ctx;
+  if (!ctx.Load(strm)) return false;
+  // load type flag
+  int32_t type_flag;
+  if (strm->Read(&type_flag, sizeof(type_flag)) != sizeof(type_flag)) return false;
+  // load data into CPU
+  NDArray temp(shape, Context::CPU(), false, type_flag);
+  TBlob load_data = temp.data();
+  size_t type_size = mshadow::mshadow_sizeof(type_flag);
+  size_t nread = type_size * shape.Size();
+
+  if (strm->Read(load_data.dptr_, nread) != nread) return false;
+  if (ctx.dev_mask() == cpu::kDevMask) {
+    *this = std::move(temp); return true;
+  } else {
+    *this = temp.Copy(ctx); return true;
+  }
+}
+
+
+const uint64_t kMXAPINDArrayListMagic = 0x112;
+
+void NDArray::Save(dmlc::Stream* fo,
+                   const std::vector<NDArray>& data,
+                   const std::vector<std::string>& names) {
+  uint64_t header = kMXAPINDArrayListMagic, reserved = 0;
+  fo->Write(&header, sizeof(header));
+  fo->Write(&reserved, sizeof(reserved));
+  fo->Write(data);
+  fo->Write(names);
+}
+
+void NDArray::Load(dmlc::Stream* fi,
+                   std::vector<NDArray>* data,
+                   std::vector<std::string>* keys) {
+  uint64_t header, reserved;
+  CHECK(fi->Read(&header))
+      << "Invalid NDArray file format";
+  CHECK(fi->Read(&reserved))
+      << "Invalid NDArray file format";
+  CHECK(header == kMXAPINDArrayListMagic)
+      << "Invalid NDArray file format";
+  CHECK(fi->Read(data))
+      << "Invalid NDArray file format";
+  CHECK(fi->Read(keys))
+      << "In
