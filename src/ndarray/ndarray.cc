@@ -904,4 +904,69 @@ void Imdecode(NDArray *ret, NDArray mean, size_t index,
     CHECK_EQ(mean.shape()[0], buff.shape()[1]);
     CHECK_EQ(mean.shape()[1], buff.shape()[2]);
     CHECK_EQ(mean.shape()[2], buff.shape()[3]);
-    mean
+    mean.WaitToRead();
+    MSHADOW_TYPE_SWITCH(buff.dtype(), DType, {
+      mshadow::Tensor<cpu, 4, DType> tensor = buff.data().get<cpu, 4, DType>();
+      mshadow::Tensor<cpu, 3, DType> tmean = mean.data().get<cpu, 3, DType>();
+      for (index_t i = 0; i < y1-y0; i++) {
+        uchar* im_data = res.ptr<uchar>(y0+i) + res.channels()*x0;
+        for (index_t j = 0; j < x1-x0; j++) {
+          for (index_t k = 0; k < n_channels; k++) {
+            tensor[0][k][i][j] = DType(im_data[k]) - tmean[k][i][j];  // NOLINT(*)
+          }
+          im_data += res.channels();
+        }
+      }
+    })
+  }
+#else
+  LOG(FATAL) << "Compile with OpenCV for image decoding.";
+#endif  // MXNET_USE_OPENCV
+}
+
+MXNET_REGISTER_NDARRAY_FUN(_broadcast)
+.set_type_mask(kAcceptEmptyMutateTarget | kNDArrayArgBeforeScalar)
+.set_body([](NDArray **u, real_t *s, NDArray **out,
+             int num_params, char **param_keys, char **param_vals) {
+      Broadcast(*u[0],
+                static_cast<int>(s[0]),
+                static_cast<int>(s[1]),
+                out[0]);
+    })
+.set_num_use_vars(1)
+.set_num_scalars(2)
+.set_num_mutate_vars(1)
+.describe("Broadcast array in the given axis to the given size")
+.add_argument("src", "NDArray", "source ndarray")
+.add_argument("axis", "int", "axis to broadcast")
+.add_argument("size", "int", "size of broadcast");
+
+MXNET_REGISTER_NDARRAY_FUN(_imdecode)
+.set_type_mask(kAcceptEmptyMutateTarget | kNDArrayArgBeforeScalar)
+.set_body([](NDArray **u, real_t *s, NDArray **out,
+             int num_params, char **param_keys, char **param_vals) {
+    CHECK_EQ(num_params, 1);
+    Imdecode(out[0], *u[0],
+             static_cast<size_t>(s[0]),
+             static_cast<size_t>(s[1]),
+             static_cast<size_t>(s[2]),
+             static_cast<size_t>(s[3]),
+             static_cast<size_t>(s[4]),
+             static_cast<size_t>(s[5]),
+             static_cast<size_t>(s[6]),
+             param_vals[0]);
+  })
+.set_num_use_vars(1)
+.set_num_scalars(7)
+.set_num_mutate_vars(1)
+.describe("Decode an image, clip to (x0, y0, x1, y1), substract mean, and write to buffer")
+.add_argument("mean", "NDArray", "image mean")
+.add_argument("index", "int", "buffer position for output")
+.add_argument("x0", "int", "x0")
+.add_argument("y0", "int", "y0")
+.add_argument("x1", "int", "x1")
+.add_argument("y1", "int", "y1")
+.add_argument("c", "int", "channel")
+.add_argument("size", "int", "length of str_img");
+#endif
+}  // namespace mxnet
