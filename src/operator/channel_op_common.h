@@ -41,4 +41,47 @@ inline void Concatenate(const std::vector<mshadow::Tensor<xpu, dim, DType> > &in
                         const OpReqType req) {
   if (dimension < 0) {
     LOG(FATAL) << "dimension (" << dimension << ") must be greater than 0";
-  } 
+  } else if (dimension >= dim) {
+    LOG(FATAL) << "dimension (" << dimension << ") must be smaller than dim (" << dim << ")";
+  } else {
+    concatenate_helper<xpu, dim, dim-1>(input, output, dimension, req);
+  }
+}
+
+
+template<typename xpu, int dim, int cdim, typename DType>
+void split_helper(const mshadow::Tensor<xpu, dim, DType> &input,
+           std::vector<mshadow::Tensor<xpu, dim, DType> > *output,
+           const int dimension, const std::vector<OpReqType> &req) {
+  using mshadow::expr::concat;
+  using mshadow::expr::slice;
+
+  if (dimension == cdim) {
+    std::vector<mshadow::Tensor<xpu, dim, DType> > out = *output;
+    size_t size = out.size();
+    index_t begin = 0;
+    for (index_t i = 0; i < size; ++i) {
+      index_t end = begin + out[i].size(cdim);
+      Assign(out[i], req[i], slice<cdim>(input, begin, end));
+      begin = end;
+    }
+  } else {
+    split_helper<xpu, dim, (cdim > 0 ? cdim - 1 : 0)>(input, output, dimension, req);
+  }
+}
+
+template<typename xpu, int dim, typename DType>
+void Split(const mshadow::Tensor<xpu, dim, DType> &input,
+           std::vector<mshadow::Tensor<xpu, dim, DType> > *output,
+           const int dimension, const std::vector<OpReqType> &req) {
+  if (dimension < 0) {
+    LOG(FATAL) << "dimension (" << dimension << ") must be greater than 0";
+  } else if (dimension >= dim) {
+    LOG(FATAL) << "dimension (" << dimension << ") must be smaller than dim (" << dim << ")";
+  } else {
+    split_helper<xpu, dim, dim-1>(input, output, dimension, req);
+  }
+}
+}  // namespace op
+}  // namespace mxnet
+#endif  // MXNET_OPERATOR_CHANNEL_OP_COMMON_H_
