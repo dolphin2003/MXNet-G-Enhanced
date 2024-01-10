@@ -181,3 +181,128 @@ class BatchNormOp : public Operator {
         Assign(gslope, req[batchnorm::kGamma],
                sumall_except_dim<1>(
                    grad * (data - broadcast<1>(mean, data.shape_)) /
+                   F<mshadow_op::square_root>(broadcast<1>(var + param_.eps, data.shape_))));
+      } else {
+        Assign(gslope, req[batchnorm::kGamma], 0.0f);
+      }
+      Assign(grad_in, req[batchnorm::kData],
+             (grad * broadcast<1>(slope, data.shape_)) *
+             broadcast<1>(1.0f / F<mshadow_op::square_root>(var + param_.eps), data.shape_) +
+             broadcast<1>(gvar, data.shape_) * scale * 2.0f * (data - broadcast<1>(mean,
+                                                                                   data.shape_)) +
+             broadcast<1>(gmean, data.shape_) * scale);
+      Assign(gbias, req[batchnorm::kBeta], sumall_except_dim<1>(grad));
+    } else {
+      // use global statistics with freeze moving mean and var.
+      if (!param_.fix_gamma) {
+        Assign(gslope, req[batchnorm::kGamma],
+               sumall_except_dim<1>(
+                   grad * (data - broadcast<1>(moving_mean, data.shape_)) /
+                   F<mshadow_op::square_root>(broadcast<1>(moving_var + param_.eps, data.shape_))));
+      } else {
+        Assign(gslope, req[batchnorm::kGamma], 0.0f);
+      }
+      Assign(gbias, req[batchnorm::kBeta], sumall_except_dim<1>(grad));
+      Assign(grad_in, req[batchnorm::kData], (grad * broadcast<1>(slope, data.shape_)) *
+             broadcast<1>(
+                 1.0f / F<mshadow_op::square_root>(moving_var + param_.eps), data.shape_));
+    }
+  }
+
+ private:
+  BatchNormParam param_;
+};  // class BatchNormOp
+
+template<typename xpu>
+Operator *CreateOp(BatchNormParam param);
+
+
+#if DMLC_USE_CXX11
+class BatchNormProp : public OperatorProperty {
+ public:
+  void Init(const std::vector<std::pair<std::string, std::string> >& kwargs) override {
+    param_.Init(kwargs);
+  }
+
+  std::map<std::string, std::string> GetParams() const override {
+    return param_.__DICT__();
+  }
+
+  bool InferShape(std::vector<TShape> *in_shape,
+                  std::vector<TShape> *out_shape,
+                  std::vector<TShape> *aux_shape) const override {
+    using namespace mshadow;
+    CHECK_EQ(in_shape->size(), 3) << "Input:[data, gamma, beta]";
+    const TShape &dshape = in_shape->at(0);
+    if (dshape.ndim() == 0) return false;
+    in_shape->at(1) = TShape(Shape1(dshape[1]));
+    in_shape->at(2) = TShape(Shape1(dshape[1]));
+    out_shape->clear();
+    out_shape->push_back(dshape);
+    out_shape->push_back(Shape1(dshape[1]));
+    out_shape->push_back(Shape1(dshape[1]));
+
+    aux_shape->clear();
+    aux_shape->push_back(Shape1(dshape[1]));
+    aux_shape->push_back(Shape1(dshape[1]));
+    return true;
+  }
+
+  OperatorProperty* Copy() const override {
+    auto ptr = new BatchNormProp();
+    ptr->param_ = param_;
+    return ptr;
+  }
+
+  std::string TypeString() const override {
+    return "BatchNorm";
+  }
+
+  std::vector<int> DeclareBackwardDependency(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data) const override {
+    return {out_grad[batchnorm::kOut],
+            out_data[batchnorm::kMean],
+            out_data[batchnorm::kVar],
+            in_data[batchnorm::kData],
+            in_data[batchnorm::kGamma],
+            in_data[batchnorm::kBeta]
+           };
+  }
+
+  std::vector<ResourceRequest> BackwardResource(
+      const std::vector<TShape> &in_shape) const override {
+    return {ResourceRequest::kTempSpace};
+  }
+
+  int NumVisibleOutputs() const override {
+    return 1;
+  }
+
+  int NumOutputs() const override {
+    return 3;
+  }
+
+  std::vector<std::string> ListArguments() const override {
+    return {"data", "gamma", "beta"};
+  }
+
+  std::vector<std::string> ListOutputs() const override {
+    return {"output", "mean", "var"};
+  }
+
+  std::vector<std::string> ListAuxiliaryStates() const override {
+    return {"moving_mean", "moving_var"};
+  }
+
+  Operator* CreateOperator(Context ctx) const override;
+
+ private:
+  BatchNormParam param_;
+};  // class BatchNormProp
+
+#endif  // DMLC_USE_CXX11
+}  // namespace op
+}  // namespace mxnet
+#endif  // MXNET_OPERATOR_BATCH_NORM_INL_H_
