@@ -289,4 +289,77 @@ class CuDNNDeconvolutionOp : public Operator {
                filter_desc_,
                conv_desc_,
                in_desc_,
-               CUDNN_
+               CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT,
+               workspace_byte,
+               &algo_), CUDNN_STATUS_SUCCESS);
+      CHECK_EQ(cudnnGetConvolutionBackwardFilterAlgorithm(s->dnn_handle_,
+               out_desc_,
+               in_desc_,
+               conv_desc_,
+               filter_desc_,
+               CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT,
+               workspace_byte,
+               &back_algo_w_), CUDNN_STATUS_SUCCESS);
+      CHECK_EQ(cudnnGetConvolutionBackwardDataAlgorithm(s->dnn_handle_,
+               filter_desc_,
+               in_desc_,
+               conv_desc_,
+               out_desc_,
+               CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT,
+               workspace_byte,
+               &back_algo_), CUDNN_STATUS_SUCCESS);
+      CHECK_EQ(cudnnGetConvolutionBackwardDataWorkspaceSize(s->dnn_handle_,
+               filter_desc_,
+               in_desc_,
+               conv_desc_,
+               out_desc_,
+               back_algo_,
+               &back_size), CUDNN_STATUS_SUCCESS);
+      CHECK_EQ(cudnnGetConvolutionBackwardFilterWorkspaceSize(s->dnn_handle_,
+               out_desc_,
+               in_desc_,
+               conv_desc_,
+               filter_desc_,
+               back_algo_w_,
+               &back_size_w), CUDNN_STATUS_SUCCESS);
+      backward_workspace_byte_ = std::max(back_size, back_size_w);
+      CHECK_EQ(cudnnGetConvolutionForwardWorkspaceSize(s->dnn_handle_,
+               out_desc_,
+               filter_desc_,
+               conv_desc_,
+               in_desc_,
+               algo_,
+               &forward_workspace_byte_), CUDNN_STATUS_SUCCESS);
+      forward_workspace_ = forward_workspace_byte_ / sizeof(DType) + 1;
+      backward_workspace_ = backward_workspace_byte_ / sizeof(DType) + 1;
+    }
+  }
+
+  bool init_cudnn_;
+  size_t forward_workspace_;
+  size_t backward_workspace_;
+  size_t forward_workspace_byte_;
+  size_t backward_workspace_byte_;
+  size_t data_offset_;
+  size_t out_offset_;
+  size_t weight_offset_;
+  size_t bias_offset_;
+  cudnnDataType_t dtype_;
+  cudnnTensorDescriptor_t in_desc_;
+  cudnnTensorDescriptor_t out_desc_;
+  cudnnTensorDescriptor_t bias_desc_;
+  cudnnFilterDescriptor_t filter_desc_;
+  cudnnConvolutionDescriptor_t conv_desc_;
+  cudnnConvolutionFwdAlgo_t algo_;
+  cudnnConvolutionBwdDataAlgo_t back_algo_;
+  cudnnConvolutionBwdFilterAlgo_t back_algo_w_;
+  #if CUDNN_MAJOR == 5
+  cudnnTensorFormat_t format_;
+  #endif
+  DeconvolutionParam param_;
+};
+#endif  // __CUDACC__ && CUDNN
+}  // namespace op
+}  // namespace mxnet
+
+#endif  // MXNET_OPERATOR_CUDNN_DECONVOLUTION_INL_H_
