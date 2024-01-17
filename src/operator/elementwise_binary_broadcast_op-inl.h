@@ -187,4 +187,134 @@ void BinaryBroadcastForward_(const TBlob& lhs,
       Tensor<xpu, MXNET_SPECIAL_MAX_NDIM, DType> mrhs =
         rhs.get_with_shape<xpu, MXNET_SPECIAL_MAX_NDIM, DType>(rhs_new_shape, s);
       ASSIGN_DISPATCH(out, req,
-        F<OP>(broadcast_to(mlhs, ou
+        F<OP>(broadcast_to(mlhs, out_new_shape_), broadcast_to(mrhs, out_new_shape_)));
+    }
+  });
+}
+
+template<typename xpu, typename LHS_OP, typename RHS_OP>
+void BinaryBroadcastBackward_(const OutputGrad& out_grad,
+                              const EnvArguments& env,
+                              TBlob* lhs_grad,
+                              TBlob* rhs_grad,
+                              OpReqType req_lhs_grad,
+                              OpReqType req_rhs_grad,
+                              RunContext ctx) {
+  using namespace mshadow;
+  using namespace mshadow::expr;
+  Stream<xpu> *s = ctx.get_stream<xpu>();
+  CHECK_EQ(out_grad.data.type_flag_, lhs_grad->type_flag_)
+    << "Binary function only support ingrad/outgrad with the same type";
+  CHECK_EQ(out_grad.data.type_flag_, rhs_grad->type_flag_)
+    << "Binary function only support ingrad/outgrad with the same type";
+  CHECK_EQ(lhs_grad->shape_.ndim(), rhs_grad->shape_.ndim()) <<
+    "the ndim of lhs_grad and rhs_grad must be equal,"
+    " shape of lhs_grad=" << lhs_grad->shape_ << " shape of rhs_grad=" << rhs_grad->shape_;
+  if (!IsBroadcastNeeded_(lhs_grad->shape_, rhs_grad->shape_)) {
+    // no broadcast
+    MSHADOW_TYPE_SWITCH(lhs_grad->type_flag_, DType, {
+        Tensor<xpu, 2, DType> mout_grad = out_grad.data.FlatTo2D<xpu, DType>(s);
+        Tensor<xpu, 2, DType> mlhs_grad = lhs_grad->FlatTo2D<xpu, DType>(s);
+        Tensor<xpu, 2, DType> mrhs_grad = rhs_grad->FlatTo2D<xpu, DType>(s);
+        ASSIGN_DISPATCH(mlhs_grad, req_lhs_grad, F<LHS_OP>(mout_grad));
+        ASSIGN_DISPATCH(mrhs_grad, req_rhs_grad, F<RHS_OP>(mout_grad));
+      });
+    return;
+  }
+  bool do_opt;
+  TShape lhs_new_shape_, rhs_new_shape_, out_new_shape_;
+  InferBroadcastNewShapes_(&do_opt, &lhs_new_shape_, &rhs_new_shape_, &out_new_shape_,
+    lhs_grad->shape_, rhs_grad->shape_, out_grad.data.shape_);
+  MSHADOW_REAL_TYPE_SWITCH(lhs_grad->type_flag_, DType, {
+    if (do_opt) {
+      Shape<3> out_new_shape;
+      for (index_t i = 0; i < 3; i++) {
+        out_new_shape[i] = out_new_shape_[i];
+      }
+      Tensor<xpu, 3, DType> mout_grad =
+        out_grad.data.get_with_shape<xpu, 3, DType>(out_new_shape, s);
+      Tensor<xpu, 1, DType> mlhs_grad =
+        lhs_grad->get_with_shape<xpu, 1, DType>(Shape1(lhs_grad->Size()), s);
+      Tensor<xpu, 1, DType> mrhs_grad =
+        rhs_grad->get_with_shape<xpu, 1, DType>(Shape1(rhs_grad->Size()), s);
+      ReduceToAssign<red::sum>(mlhs_grad, req_lhs_grad, lhs_new_shape_, F<LHS_OP>(mout_grad));
+      ReduceToAssign<red::sum>(mrhs_grad, req_rhs_grad, rhs_new_shape_, F<RHS_OP>(mout_grad));
+    } else {
+      Shape<MXNET_SPECIAL_MAX_NDIM> out_new_shape;
+      for (index_t i = 0; i < MXNET_SPECIAL_MAX_NDIM; i++) {
+        out_new_shape[i] = out_new_shape_[i];
+      }
+      Tensor<xpu, MXNET_SPECIAL_MAX_NDIM, DType> mout_grad =
+        out_grad.data.get_with_shape<xpu, MXNET_SPECIAL_MAX_NDIM, DType>(out_new_shape, s);
+      Tensor<xpu, 1, DType> mlhs_grad =
+        lhs_grad->get_with_shape<xpu, 1, DType>(Shape1(lhs_grad->Size()), s);
+      Tensor<xpu, 1, DType> mrhs_grad =
+        rhs_grad->get_with_shape<xpu, 1, DType>(Shape1(rhs_grad->Size()), s);
+      ReduceToAssign<red::sum>(mlhs_grad, req_lhs_grad, lhs_new_shape_, F<LHS_OP>(mout_grad));
+      ReduceToAssign<red::sum>(mrhs_grad, req_rhs_grad, rhs_new_shape_, F<RHS_OP>(mout_grad));
+    }
+  });
+}
+
+template<typename xpu>
+void BroadcastMulBackward_(const OutputGrad& out_grad,
+                            const Input0& lhs,
+                            const Input1& rhs,
+                            const EnvArguments& env,
+                            TBlob* lhs_grad,
+                            TBlob* rhs_grad,
+                            OpReqType req_lhs_grad,
+                            OpReqType req_rhs_grad,
+                            RunContext ctx) {
+  using namespace mshadow;
+  using namespace mshadow::expr;
+  Stream<xpu> *s = ctx.get_stream<xpu>();
+  if (!IsBroadcastNeeded_(lhs_grad->shape_, rhs_grad->shape_)) {
+    MSHADOW_TYPE_SWITCH(lhs_grad->type_flag_, DType, {
+      mshadow::Tensor<xpu, 2, DType> mout_grad = out_grad.data.FlatTo2D<xpu, DType>(s);
+      mshadow::Tensor<xpu, 2, DType> mlhs_data = lhs.data.FlatTo2D<xpu, DType>(s);
+      mshadow::Tensor<xpu, 2, DType> mrhs_data = rhs.data.FlatTo2D<xpu, DType>(s);
+      mshadow::Tensor<xpu, 2, DType> mlhs_grad = lhs_grad->FlatTo2D<xpu, DType>(s);
+      mshadow::Tensor<xpu, 2, DType> mrhs_grad = rhs_grad->FlatTo2D<xpu, DType>(s);
+      CHECK_NE(req_rhs_grad, kWriteInplace);
+      ASSIGN_DISPATCH(mrhs_grad, req_rhs_grad, mlhs_data * mout_grad);
+      ASSIGN_DISPATCH(mlhs_grad, req_lhs_grad, mrhs_data * mout_grad);
+    });
+    return;
+  }
+  bool do_opt;
+  TShape lhs_new_shape_, rhs_new_shape_, out_new_shape_;
+  InferBroadcastNewShapes_(&do_opt, &lhs_new_shape_, &rhs_new_shape_, &out_new_shape_,
+    lhs_grad->shape_, rhs_grad->shape_, out_grad.data.shape_);
+  MSHADOW_REAL_TYPE_SWITCH(lhs_grad->type_flag_, DType, {
+    if (do_opt) {
+      Shape<3> lhs_new_shape, rhs_new_shape, out_new_shape;
+      for (index_t i = 0; i < 3; i++) {
+        lhs_new_shape[i] = lhs_new_shape_[i];
+        rhs_new_shape[i] = rhs_new_shape_[i];
+        out_new_shape[i] = out_new_shape_[i];
+      }
+      mshadow::Tensor<xpu, 3, DType> mout_grad =
+        out_grad.data.get_with_shape<xpu, 3, DType>(out_new_shape, s);
+      mshadow::Tensor<xpu, 3, DType> mlhs_data =
+        lhs.data.get_with_shape<xpu, 3, DType>(lhs_new_shape, s);
+      mshadow::Tensor<xpu, 3, DType> mrhs_data =
+        rhs.data.get_with_shape<xpu, 3, DType>(rhs_new_shape, s);
+      mshadow::Tensor<xpu, 1, DType> mlhs_grad =
+        lhs_grad->get_with_shape<xpu, 1, DType>(Shape1(lhs_grad->Size()), s);
+      mshadow::Tensor<xpu, 1, DType> mrhs_grad =
+        rhs_grad->get_with_shape<xpu, 1, DType>(Shape1(rhs_grad->Size()), s);
+      ReduceToAssign<red::sum>(mrhs_grad, req_rhs_grad, rhs_new_shape_,
+        broadcast_to(mlhs_data, out_new_shape_) * mout_grad);
+      ReduceToAssign<red::sum>(mlhs_grad, req_lhs_grad, lhs_new_shape_,
+        broadcast_to(mrhs_data, out_new_shape_) * mout_grad);
+    } else {
+      Shape<MXNET_SPECIAL_MAX_NDIM> lhs_new_shape, rhs_new_shape, out_new_shape;
+      for (index_t i = 0; i < MXNET_SPECIAL_MAX_NDIM; i++) {
+        lhs_new_shape[i] = lhs_new_shape_[i];
+        rhs_new_shape[i] = rhs_new_shape_[i];
+        out_new_shape[i] = out_new_shape_[i];
+      }
+      mshadow::Tensor<xpu, MXNET_SPECIAL_MAX_NDIM, DType> mout_grad =
+        out_grad.data.get_with_shape<xpu, MXNET_SPECIAL_MAX_NDIM, DType>(out_new_shape, s);
+      mshadow::Te
