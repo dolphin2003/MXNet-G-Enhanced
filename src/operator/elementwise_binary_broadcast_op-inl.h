@@ -455,4 +455,95 @@ void BroadcastPowerBackward_(const OutputGrad& out_grad,
       for (index_t i = 0; i < 3; i++) {
         lhs_new_shape[i] = lhs_new_shape_[i];
         rhs_new_shape[i] = rhs_new_shape_[i];
-        out_new_shape[i] = ou
+        out_new_shape[i] = out_new_shape_[i];
+      }
+      mshadow::Tensor<xpu, 3, DType> mout_grad =
+        out_grad.data.get_with_shape<xpu, 3, DType>(out_new_shape, s);
+      mshadow::Tensor<xpu, 3, DType> mlhs_data =
+        lhs.data.get_with_shape<xpu, 3, DType>(lhs_new_shape, s);
+      mshadow::Tensor<xpu, 3, DType> mrhs_data =
+        rhs.data.get_with_shape<xpu, 3, DType>(rhs_new_shape, s);
+      mshadow::Tensor<xpu, 1, DType> mlhs_grad =
+        lhs_grad->get_with_shape<xpu, 1, DType>(Shape1(lhs_grad->Size()), s);
+      mshadow::Tensor<xpu, 1, DType> mrhs_grad =
+        rhs_grad->get_with_shape<xpu, 1, DType>(Shape1(rhs_grad->Size()), s);
+      ReduceToAssign<red::sum>(mrhs_grad, req_rhs_grad, rhs_new_shape_,
+        F<mshadow_op::log>(broadcast_to(mlhs_data, out_new_shape_)) *
+        F<mshadow_op::power>(broadcast_to(mlhs_data, out_new_shape_),
+                             broadcast_to(mrhs_data, out_new_shape_)) * mout_grad);
+      ReduceToAssign<red::sum>(mlhs_grad, req_lhs_grad, lhs_new_shape_,
+        broadcast_to(mrhs_data, out_new_shape_) *
+        F<mshadow_op::power>(broadcast_to(mlhs_data, out_new_shape_),
+                             broadcast_to(mrhs_data, out_new_shape_) - scalar<DType>(1)) *
+        mout_grad);
+    } else {
+      Shape<MXNET_SPECIAL_MAX_NDIM> lhs_new_shape, rhs_new_shape, out_new_shape;
+      for (index_t i = 0; i < MXNET_SPECIAL_MAX_NDIM; i++) {
+        lhs_new_shape[i] = lhs_new_shape_[i];
+        rhs_new_shape[i] = rhs_new_shape_[i];
+        out_new_shape[i] = out_new_shape_[i];
+      }
+      mshadow::Tensor<xpu, MXNET_SPECIAL_MAX_NDIM, DType> mout_grad =
+        out_grad.data.get_with_shape<xpu, MXNET_SPECIAL_MAX_NDIM, DType>(out_new_shape, s);
+      mshadow::Tensor<xpu, MXNET_SPECIAL_MAX_NDIM, DType> mlhs_data =
+        lhs.data.get_with_shape<xpu, MXNET_SPECIAL_MAX_NDIM, DType>(lhs_new_shape, s);
+      mshadow::Tensor<xpu, MXNET_SPECIAL_MAX_NDIM, DType> mrhs_data =
+        rhs.data.get_with_shape<xpu, MXNET_SPECIAL_MAX_NDIM, DType>(rhs_new_shape, s);
+      mshadow::Tensor<xpu, 1, DType> mlhs_grad =
+        lhs_grad->get_with_shape<xpu, 1, DType>(Shape1(lhs_grad->Size()), s);
+      mshadow::Tensor<xpu, 1, DType> mrhs_grad =
+        rhs_grad->get_with_shape<xpu, 1, DType>(Shape1(rhs_grad->Size()), s);
+      ReduceToAssign<red::sum>(mrhs_grad, req_rhs_grad, rhs_new_shape_,
+        F<mshadow_op::log>(broadcast_to(mlhs_data, out_new_shape_)) *
+        F<mshadow_op::power>(broadcast_to(mlhs_data, out_new_shape_),
+        broadcast_to(mrhs_data, out_new_shape_)) * mout_grad);
+      ReduceToAssign<red::sum>(mlhs_grad, req_lhs_grad, lhs_new_shape_,
+        broadcast_to(mrhs_data, out_new_shape_) *
+        F<mshadow_op::power>(broadcast_to(mlhs_data, out_new_shape_),
+        broadcast_to(mrhs_data, out_new_shape_) - scalar<DType>(1)) *
+        mout_grad);
+    }
+  });
+}
+
+
+MXNET_REGISTER_SIMPLE_OP(broadcast_plus, XPU)
+.set_shape_function(BinaryBroadcastShape_)
+.set_function(XPU::kDevMask, BinaryBroadcastForward_<
+              XPU, mshadow::op::plus>, kNoInplace, kRegisterSymbolic)
+.set_gradient(XPU::kDevMask, BinaryBroadcastBackward_<
+              XPU, mshadow_op::identity, mshadow_op::identity>, kNoInplace)
+.describe("lhs add rhs with broadcast");
+
+MXNET_REGISTER_SIMPLE_OP(broadcast_minus, XPU)
+.set_shape_function(BinaryBroadcastShape_)
+.set_function(XPU::kDevMask, BinaryBroadcastForward_<
+              XPU, mshadow::op::minus>, kNoInplace, kRegisterSymbolic)
+.set_gradient(XPU::kDevMask, BinaryBroadcastBackward_<
+              XPU, mshadow_op::identity, mshadow_op::negation>, kNoInplace)
+.describe("lhs minus rhs with broadcast");
+
+MXNET_REGISTER_SIMPLE_OP(broadcast_mul, XPU)
+.set_shape_function(BinaryBroadcastShape_)
+.set_function(XPU::kDevMask, BinaryBroadcastForward_<
+              XPU, mshadow::op::mul>, kNoInplace, kRegisterSymbolic)
+.set_gradient(XPU::kDevMask, BroadcastMulBackward_<XPU>, kNoInplace)
+.describe("lhs multiple rhs with broadcast");
+
+MXNET_REGISTER_SIMPLE_OP(broadcast_div, XPU)
+.set_shape_function(BinaryBroadcastShape_)
+.set_function(XPU::kDevMask, BinaryBroadcastForward_<
+              XPU, mshadow::op::div>, kNoInplace, kRegisterSymbolic)
+.set_gradient(XPU::kDevMask, BroadcastDivBackward_<XPU>, kNoInplace)
+.describe("lhs divide rhs with broadcast");
+
+MXNET_REGISTER_SIMPLE_OP(broadcast_power, XPU)
+.set_shape_function(BinaryBroadcastShape_)
+.set_function(XPU::kDevMask, BinaryBroadcastForward_<
+              XPU, mshadow_op::power>, kNoInplace, kRegisterSymbolic)
+.set_gradient(XPU::kDevMask, BroadcastPowerBackward_<XPU>, kNoInplace)
+.describe("lhs power rhs with broadcast");
+
+}  // namespace op
+}  // namespace mxnet
+#endif  // MXNET_OPERATOR_ELEMENTWISE_BINARY_BROADCAST_OP_INL_H_
