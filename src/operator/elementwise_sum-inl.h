@@ -194,4 +194,49 @@ class ElementWiseSumProp : public OperatorProperty {
   }
 
   OperatorProperty* Copy() const override {
-    aut
+    auto ptr = new ElementWiseSumProp();
+    ptr->param_ = param_;
+    return ptr;
+  }
+
+  std::string TypeString() const override {
+    return "ElementWiseSum";
+  }
+
+  std::vector<int> DeclareBackwardDependency(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data) const override {
+    return out_grad;
+  }
+
+  std::vector<std::pair<int, void*> > BackwardInplaceOption(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data,
+    const std::vector<void*> &in_grad) const override {
+    return {{out_grad[0], in_grad[0]}};
+  }
+
+  std::vector<std::pair<int, void*> > ForwardInplaceOption(
+    const std::vector<int> &in_data,
+    const std::vector<void*> &out_data) const override {
+    return {{in_data[0], out_data[0]}};
+  }
+
+  Operator* CreateOperator(Context ctx) const override {
+    LOG(FATAL) << "Not Implemented";
+    return NULL;
+  }
+
+  Operator* CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+                             std::vector<int> *in_type) const override;
+
+ private:
+  ElementWiseSumParam param_;
+};  // class ElementWiseSumProp
+#endif  // DMLC_USE_CXX11
+
+}  // namespace op
+}  // namespace mxnet
+#endif  // MXNET_OPERATOR_ELEMENTWISE_SUM_INL_H_
