@@ -58,4 +58,115 @@ class LocalResponseNormOp : public Operator {
     CHECK_EQ(in_data.size(), 1);
     CHECK_EQ(out_data.size(), 2);
     // CHECK_EQ(req.size(), 2);
-    CHECK_EQ(param_.nsize
+    CHECK_EQ(param_.nsize % 2, 1) << "LRN only supports odd values for local_size";
+    const real_t salpha = param_.alpha / param_.nsize;
+    Stream<xpu> *s = ctx.get_stream<xpu>();
+    Tensor<xpu, 4> data = in_data[lrn_enum::kData].get<xpu, 4, real_t>(s);
+    Tensor<xpu, 4> out = out_data[lrn_enum::kOut].get<xpu, 4, real_t>(s);
+    Tensor<xpu, 4> tmp_norm = out_data[lrn_enum::kTmpNorm].get<xpu, 4, real_t>(s);
+    tmp_norm = chpool<red::sum>(F<mshadow_op::square>(data) , param_.nsize) * salpha + param_.knorm;
+    Assign(out, req[lrn_enum::kOut], data *  F<mshadow_op::power>(tmp_norm, -param_.beta));
+  }
+
+  virtual void Backward(const OpContext &ctx,
+                        const std::vector<TBlob> &out_grad,
+                        const std::vector<TBlob> &in_data,
+                        const std::vector<TBlob> &out_data,
+                        const std::vector<OpReqType> &req,
+                        const std::vector<TBlob> &in_grad,
+                        const std::vector<TBlob> &aux_states) {
+    using namespace mshadow;
+    using namespace mshadow::expr;
+    CHECK_EQ(out_grad.size(), 1);
+    CHECK_EQ(in_data.size(), 1);
+    CHECK_EQ(out_data.size(), 2);
+    const real_t salpha = param_.alpha / param_.nsize;
+    Stream<xpu> *s = ctx.get_stream<xpu>();
+    Tensor<xpu, 4> grad = out_grad[lrn_enum::kOut].get<xpu, 4, real_t>(s);
+    Tensor<xpu, 4> tmp_norm = out_data[lrn_enum::kTmpNorm].get<xpu, 4, real_t>(s);
+    Tensor<xpu, 4> data = in_data[lrn_enum::kData].get<xpu, 4, real_t>(s);
+    Tensor<xpu, 4> grad_in = in_grad[lrn_enum::kData].get<xpu, 4, real_t>(s);
+    grad_in = grad * F<mshadow_op::power>(tmp_norm, -param_.beta);
+    grad_in += (- 2.0f * param_.beta * salpha) *
+               chpool<red::sum>(grad * data *
+                                F<mshadow_op::power>(tmp_norm, -param_.beta - 1.0f),
+                                param_.nsize)  * data;
+  }
+
+ private:
+  LRNParam param_;
+};  // class LocalResponseNormOp
+
+template<typename xpu>
+Operator *CreateOp(LRNParam param);
+
+#if DMLC_USE_CXX11
+class LocalResponseNormProp : public OperatorProperty {
+ public:
+  void Init(const std::vector<std::pair<std::string, std::string> >& kwargs) override {
+    param_.Init(kwargs);
+  }
+
+  std::map<std::string, std::string> GetParams() const override {
+    return param_.__DICT__();
+  }
+
+  bool InferShape(std::vector<TShape> *in_shape,
+                  std::vector<TShape> *out_shape,
+                  std::vector<TShape> *aux_shape) const override {
+    using namespace mshadow;
+    CHECK_EQ(in_shape->size(), 1) << "Input:[data]";
+    const TShape &dshape = in_shape->at(0);
+    if (dshape.ndim() == 0) return false;
+    out_shape->clear();
+    out_shape->push_back(dshape);
+    out_shape->push_back(dshape);
+    return true;
+  }
+
+  OperatorProperty* Copy() const override {
+    auto ptr = new LocalResponseNormProp();
+    ptr->param_ = param_;
+    return ptr;
+  }
+
+  std::string TypeString() const override {
+    return "LRN";
+  }
+
+  std::vector<int> DeclareBackwardDependency(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data) const override {
+    return {
+      out_grad[lrn_enum::kOut], in_data[lrn_enum::kData],
+      out_data[lrn_enum::kTmpNorm], out_data[lrn_enum::kOut]
+    };
+  }
+
+  int NumVisibleOutputs() const override {
+    return 1;
+  }
+
+  int NumOutputs() const override {
+    return 2;
+  }
+
+  std::vector<std::string> ListArguments() const override {
+    return {"data"};
+  }
+
+  std::vector<std::string> ListOutputs() const override {
+    return {"output", "tmp_norm"};
+  }
+
+  Operator* CreateOperator(Context ctx) const override;
+
+ private:
+  LRNParam param_;
+};  // LocalResponseNormProp
+#endif  // DMLC_USE_CXX11
+}  // namespace op
+}  // namespace mxnet
+#endif  // MXNET_OPERATOR_LRN_INL_H_
+
