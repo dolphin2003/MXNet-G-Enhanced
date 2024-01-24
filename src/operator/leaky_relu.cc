@@ -22,4 +22,9 @@ DMLC_REGISTER_PARAMETER(LeakyReLUParam);
 
 MXNET_REGISTER_OP_PROPERTY(LeakyReLU, LeakyReLUProp)
 .describe("Apply activation function to input.")
-.add_argument("data", "Symbol", "Input
+.add_argument("data", "Symbol", "Input data to activation function.")
+.add_arguments(LeakyReLUParam::__FIELDS__());
+
+}  // namespace op
+}  // namespace mxnet
+
