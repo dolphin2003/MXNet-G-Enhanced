@@ -207,4 +207,54 @@ class NativeOpProp : public OperatorProperty {
     shapes.resize(param_.num_inputs_+param_.num_outputs_);
     ndims.resize(param_.num_inputs_+param_.num_outputs_);
     param_.pinfo->infer_shape(shapes.size(), ndims.data(), shapes.data(),
-          param_.pinfo->p_infe
+          param_.pinfo->p_infer_shape);
+    for (unsigned i = 0; i < in_shape->size(); ++i) {
+      SHAPE_ASSIGN_CHECK(*in_shape, i, TShape(shapes[i], shapes[i]+ndims[i]));
+    }
+    out_shape->clear();
+    for (unsigned i = param_.num_inputs_; i < shapes.size(); ++i) {
+      out_shape->push_back(TShape(shapes[i], shapes[i]+ndims[i]));
+    }
+    return true;
+  }
+
+  OperatorProperty* Copy() const override {
+    NativeOpProp *prop_sym = new NativeOpProp();
+    prop_sym->param_ = this->param_;
+    return prop_sym;
+  }
+
+  std::string TypeString() const override {
+    return "_Native";
+  }
+
+  std::vector<int> DeclareBackwardDependency(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data) const override {
+    std::vector<int> deps;
+    if (param_.need_top_grad) {
+      deps.insert(deps.end(), out_grad.begin(), out_grad.end());
+    }
+    deps.insert(deps.end(), in_data.begin(), in_data.end());
+    deps.insert(deps.end(), out_data.begin(), out_data.end());
+    return deps;
+  }
+
+  std::vector<std::pair<int, void*> > BackwardInplaceOption(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data,
+    const std::vector<void*> &in_grad) const override {
+    return {};
+  }
+
+  Operator* CreateOperator(Context ctx) const override;
+
+ private:
+  NativeOpParam param_;
+};  // class PythonProp
+#endif  // DMLC_USE_CXX11
+}  // namespace op
+}  // namespace mxnet
+#endif  // MXNET_OPERATOR_NATIVE_OP_INL_H_
