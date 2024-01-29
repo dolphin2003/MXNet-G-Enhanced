@@ -249,4 +249,42 @@ class PoolingProp : public OperatorProperty {
   }
 
   std::string TypeString() const override {
- 
+    return "Pooling";
+  }
+
+  std::vector<int> DeclareBackwardDependency(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data) const override {
+    return {out_grad[pool_enum::kOut], in_data[pool_enum::kData], out_data[pool_enum::kOut]};
+  }
+
+  std::vector<std::pair<int, void*> > BackwardInplaceOption(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data,
+    const std::vector<void*> &in_grad) const override {
+#if MXNET_USE_CUDNN == 1
+    return {};
+#else
+    return {{in_data[pool_enum::kData], in_grad[pool_enum::kData]}};
+#endif
+  }
+
+  Operator* CreateOperator(Context ctx) const override {
+    LOG(FATAL) << "Not Implemented.";
+    return NULL;
+  }
+
+  Operator* CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+                             std::vector<int> *in_type) const override;
+
+ private:
+  PoolingParam param_;
+};  // class PoolingProp
+#endif  // DMLC_USE_CXX11
+}  // namespace op
+}  // namespace mxnet
+
+#endif  // MXNET_OPERATOR_POOLING_INL_H_
+
