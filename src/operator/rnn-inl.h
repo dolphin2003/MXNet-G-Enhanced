@@ -224,3 +224,93 @@ class RNNProp : public OperatorProperty {
       out_shape->push_back(outStateShape);
       // Deal with lstm cell state
       if (param_.mode == rnn_enum::kLstm)
+        out_shape->push_back(outStateShape);
+      return true;
+    }
+  }
+
+  bool InferType(std::vector<int> *in_type,
+                 std::vector<int> *out_type,
+                 std::vector<int> *aux_type) const override {
+    CHECK_GE(in_type->size(), 1);
+    int dtype = (*in_type)[0];
+    CHECK_NE(dtype, -1) << "First input must have specified type";
+    for (index_t i = 0; i < in_type->size(); ++i) {
+      if ((*in_type)[i] == -1) {
+        (*in_type)[i] = dtype;
+      } else {
+        CHECK_EQ((*in_type)[i], dtype) << "This layer requires uniform type. "
+                                       << "Expected " << dtype << " v.s. given "
+                                       << (*in_type)[i] << " at " << ListArguments()[i];
+      }
+    }
+    out_type->clear();
+    out_type->push_back(dtype);
+    if (!param_.state_outputs) {
+      return true;
+    } else {
+      out_type->push_back(dtype);
+      // Deal with lstm cell state
+      if (param_.mode == rnn_enum::kLstm)
+        out_type->push_back(dtype);
+      return true;
+    }
+  }
+
+  OperatorProperty* Copy() const override {
+    auto ptr = new RNNProp();
+    ptr->param_ = param_;
+    return ptr;
+  }
+
+  std::string TypeString() const override {
+    return "RNN";
+  }
+
+  std::vector<int> DeclareBackwardDependency(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data) const override {
+    std::vector<int> dep = {in_data[rnn_enum::kData], in_data[rnn_enum::kParams],
+        in_data[rnn_enum::kState], out_data[rnn_enum::kOut], out_grad[rnn_enum::kOut]};
+
+    if (param_.state_outputs) {
+      dep.push_back(out_data[rnn_enum::kStateOut]);
+      dep.push_back(out_grad[rnn_enum::kStateOut]);
+    }
+
+    if (param_.mode == rnn_enum::kLstm) {
+      dep.push_back(in_data[rnn_enum::kStateCell]);
+      if (param_.state_outputs) {
+        dep.push_back(out_data[rnn_enum::kStateCellOut]);
+        dep.push_back(out_grad[rnn_enum::kStateCellOut]);
+      }
+    }
+    return dep;
+  }
+
+  std::vector<ResourceRequest> ForwardResource(
+      const std::vector<TShape> &in_shape) const override {
+    return {ResourceRequest::kTempSpace};
+  }
+
+  std::vector<ResourceRequest> BackwardResource(
+      const std::vector<TShape> &in_shape) const override {
+    return {ResourceRequest::kTempSpace};
+  }
+
+  Operator* CreateOperator(Context ctx) const override {
+    LOG(FATAL) << "Not Implemented";
+    return NULL;
+  }
+
+  Operator* CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+                             std::vector<int> *in_type) const override;
+
+ private:
+  RNNParam param_;
+};  // class RNNProp
+#endif  // DMLC_USE_CXX11
+}  // namespace op
+}  // namespace mxnet
+#endif  // MXNET_OPERATOR_RNN_INL_H_
