@@ -183,4 +183,38 @@ class SequenceMaskProp : public OperatorProperty {
 
   OperatorProperty *Copy() const override {
     auto ptr = new SequenceMaskProp();
-    ptr->
+    ptr->param_ = param_;
+    return ptr;
+  }
+
+  std::string TypeString() const override { return "SequenceMask"; }
+
+  std::vector<int> DeclareBackwardDependency(
+      const std::vector<int> &out_grad, const std::vector<int> &in_data,
+      const std::vector<int> &out_data) const override {
+    if (param_.use_sequence_length)
+      return {out_grad[seq_mask::kOut], in_data[seq_mask::kSequenceLength]};
+    else
+      return {out_grad[seq_mask::kOut]};
+  }
+
+  std::vector<ResourceRequest> BackwardResource(
+      const std::vector<TShape> &in_shape) const override {
+    return {ResourceRequest::kTempSpace};
+  }
+
+  Operator *CreateOperator(Context ctx) const override {
+    LOG(FATAL) << "Not Implemented.";
+    return NULL;
+  }
+
+  Operator *CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+                             std::vector<int> *in_type) const override;
+
+ private:
+  SequenceMaskParam param_;
+};      // class SequenceMaskProp
+#endif  // DMLC_USE_CXX11
+}  // namespace op
+}  // namespace mxnet
+#endif  // MXNET_OPERATOR_SEQUENCE_MASK_INL_H_
