@@ -220,3 +220,25 @@ class SequenceReverseProp : public OperatorProperty {
               in_data[seq_reverse::kSequenceLength]};
     else
       return {out_grad[seq_reverse::kOut]};
+  }
+
+  std::vector<ResourceRequest> BackwardResource(
+      const std::vector<TShape> &in_shape) const override {
+    return {ResourceRequest::kTempSpace};
+  }
+
+  Operator *CreateOperator(Context ctx) const override {
+    LOG(FATAL) << "Not Implemented.";
+    return NULL;
+  }
+
+  Operator *CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+                             std::vector<int> *in_type) const override;
+
+ private:
+  SequenceReverseParam param_;
+};      // class SequenceReverseProp
+#endif  // DMLC_USE_CXX11
+}  // namespace op
+}  // namespace mxnet
+#endif  // MXNET_OPERATOR_SEQUENCE_REVERSE_INL_H_
