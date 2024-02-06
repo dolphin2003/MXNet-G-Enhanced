@@ -241,4 +241,102 @@ class SoftmaxOutputProp : public OperatorProperty {
           std::ostringstream os;
           os << "Expecting " << lshape1 << " or " << lshape2
              << ". But got " << in_shape->at(softmaxout_enum::kLabel);
-          throw InferShape
+          throw InferShapeError(os.str(), softmaxout_enum::kLabel);
+        }
+      } else {
+        TShape label_shape(dshape.ndim() - 1);
+        for (index_t i = 0; i + 1 < dshape.ndim(); ++i)
+          label_shape[i] = dshape[i];
+        SHAPE_ASSIGN_CHECK(*in_shape, softmaxout_enum::kLabel, label_shape);
+      }
+    }
+    out_shape->clear();
+    out_shape->push_back(dshape);
+    return true;
+  }
+
+  bool InferType(std::vector<int> *in_type,
+                 std::vector<int> *out_type,
+                 std::vector<int> *aux_type) const override {
+    CHECK_GE(in_type->size(), 1);
+    int dtype = (*in_type)[0];
+    CHECK_NE(dtype, -1) << "First input must have specified type";
+    for (index_t i = 0; i < in_type->size(); ++i) {
+      if ((*in_type)[i] == -1) {
+        (*in_type)[i] = dtype;
+      } else {
+        CHECK_EQ((*in_type)[i], dtype) << "This layer requires uniform type. "
+                                       << "Expected " << dtype << " v.s. given "
+                                       << (*in_type)[i] << " at " << ListArguments()[i];
+      }
+    }
+    out_type->clear();
+    out_type->push_back(dtype);
+    return true;
+  }
+
+  OperatorProperty* Copy() const override {
+    auto ptr = new SoftmaxOutputProp();
+    ptr->param_ = param_;
+    return ptr;
+  }
+
+  std::string TypeString() const override {
+    return "SoftmaxOutput";
+  }
+
+  std::vector<int> DeclareBackwardDependency(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data) const override {
+    return {in_data[softmaxout_enum::kLabel], out_data[softmaxout_enum::kOut]};
+  }
+
+  std::vector<std::pair<int, void*> > BackwardInplaceOption(
+    const std::vector<int> &out_grad,
+    const std::vector<int> &in_data,
+    const std::vector<int> &out_data,
+    const std::vector<void*> &in_grad) const override {
+    return {{out_data[softmaxout_enum::kOut], in_grad[softmaxout_enum::kData]}};
+  }
+
+  std::vector<std::pair<int, void*> > ForwardInplaceOption(
+    const std::vector<int> &in_data,
+    const std::vector<void*> &out_data) const override {
+    return {{in_data[softmaxout_enum::kData], out_data[softmaxout_enum::kOut]}};
+  }
+
+  std::vector<ResourceRequest> BackwardResource(
+      const std::vector<TShape> &in_shape) const override {
+    return {ResourceRequest::kTempSpace};
+  }
+
+  Operator* CreateOperator(Context ctx) const override {
+    LOG(FATAL) << "Not Implemented.";
+    return NULL;
+  }
+
+  Operator* CreateOperatorEx(Context ctx, std::vector<TShape> *in_shape,
+                             std::vector<int> *in_type) const override;
+
+ protected:
+  SoftmaxOutputParam param_;
+};  // class SoftmaxOutputProp
+
+class DeprecatedSoftmaxProp : public SoftmaxOutputProp {
+ public:
+  void Init(const std::vector<std::pair<std::string, std::string> >& kwargs) override {
+    LOG(INFO) << "Softmax symbol is renamed to SoftmaxOutput. "
+      << "This API will be deprecated in Dec, 2015";
+    SoftmaxOutputProp::param_.Init(kwargs);
+  }
+
+  std::string TypeString() const override {
+    return "Softmax";
+  }
+};
+#endif  // DMLC_USE_CXX11
+
+}  // namespace op
+}  // namespace mxnet
+#endif  // MXNET_OPERATOR_SOFTMAX_OUTPUT_INL_H_
