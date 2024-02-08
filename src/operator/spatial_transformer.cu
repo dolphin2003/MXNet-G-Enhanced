@@ -149,4 +149,12 @@ Operator* CreateOp<gpu>(SpatialTransformerParam param, int dtype) {
     op = new CuDNNSpatialTransformerOp<DType>(param);
   })
 #else
-  MSHADOW_REAL_TYPE_SWITCH(dt
+  MSHADOW_REAL_TYPE_SWITCH(dtype, DType, {
+    op = new SpatialTransformerOp<gpu, DType>(param);
+  })
+#endif  // MXNET_USE_CUDNN && CUDNN_MAJOR
+  return op;
+}
+
+}  // namespace op
+}  // namespace mxnet
