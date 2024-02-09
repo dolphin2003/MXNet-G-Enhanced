@@ -199,4 +199,59 @@ class ResourceManagerImpl : public ResourceManager {
     }
     ~ResourceTempSpace() {
       for (size_t i = 0; i < space.size(); ++i) {
-        
+        SpaceAllocator r = space[i];
+        Engine::Get()->DeleteVariable(
+            [r](RunContext rctx){
+              SpaceAllocator rcpy = r;
+              MSHADOW_CATCH_ERROR(rcpy.ReleaseAll());
+            }, ctx, resource[i].var);
+      }
+    }
+    // get next resource in round roubin matter
+    inline Resource GetNext() {
+      const size_t kMaxDigit = std::numeric_limits<size_t>::max() / 2;
+      size_t ptr = ++curr_ptr;
+      // reset ptr to avoid undefined behavior during overflow
+      // usually this won't happen
+      if (ptr > kMaxDigit) {
+        curr_ptr.store((ptr + 1) % space.size());
+      }
+      return resource[ptr % space.size()];
+    }
+  };
+  /*! \brief number of copies in CPU temp space */
+  int cpu_temp_space_copy_;
+  /*! \brief number of copies in GPU temp space */
+  int gpu_temp_space_copy_;
+  /*! \brief Reference to the engine */
+  std::shared_ptr<Engine> engine_ref_;
+  /*! \brief Reference to the storage */
+  std::shared_ptr<Storage> storage_ref_;
+  /*! \brief internal seed to the random number generator */
+  uint32_t global_seed_;
+  /*! \brief CPU random number resources */
+  std::unique_ptr<ResourceRandom<cpu> > cpu_rand_;
+  /*! \brief CPU temp space resources */
+  std::unique_ptr<ResourceTempSpace> cpu_space_;
+#if MXNET_USE_CUDA
+  /*! \brief random number generator for GPU */
+  common::LazyAllocArray<ResourceRandom<gpu> > gpu_rand_;
+  /*! \brief temp space for GPU */
+  common::LazyAllocArray<ResourceTempSpace> gpu_space_;
+#endif
+};
+}  // namespace resource
+
+void* Resource::get_space_internal(size_t size) const {
+  return static_cast<resource::SpaceAllocator*>(ptr_)->GetSpace(size);
+}
+
+void* Resource::get_host_space_internal(size_t size) const {
+  return static_cast<resource::SpaceAllocator*>(ptr_)->GetHostSpace(size);
+}
+
+ResourceManager* ResourceManager::Get() {
+  typedef dmlc::ThreadLocalStore<resource::ResourceManagerImpl> inst;
+  return inst::Get();
+}
+}  // namespace mxnet
