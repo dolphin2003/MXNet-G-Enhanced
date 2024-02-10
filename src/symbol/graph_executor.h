@@ -200,4 +200,82 @@ class GraphExecutor : public Executor {
   inline int GetNumOutputs(uint32_t node_id) const;
   /*!
    * \brief get execution entry for an OpNode.
-   *  This function can only be called after initialization
+   *  This function can only be called after initialization is done.
+   * \param node_id the id of operational node.
+   * \return the execution entry.
+   */
+  inline OpExecEntry GetOpExecEntry(uint32_t node_id);
+  /*!
+   * \brief Try to create a cached operator to run segments between start and end
+   * \param topo_start beginning of segment
+   * \param topo_end end of segment
+   * \return the cached operator.
+   * The ret.opr can be nullptr if tyhe creation failed
+   */
+  CachedSegOpr CreateCachedSegOpr(size_t topo_start, size_t topo_end);
+  // initialize the internal graph structure
+  void InitGraph(const Symbol &symbol,
+                 const Context& default_ctx,
+                 const std::map<std::string, Context>& ctx_map,
+                 const std::vector<NDArray> &in_args,
+                 const std::vector<NDArray> &arg_grad_store,
+                 const std::vector<OpReqType> &grad_req_type,
+                 bool need_backward);
+  // initialize internal DataEntryInfo, reference counting
+  void InitDataEntryInfo(const std::vector<NDArray> &in_args,
+                         const std::vector<NDArray> &arg_grad_store,
+                         const std::vector<OpReqType> &grad_req_type,
+                         const std::vector<NDArray> &aux_states);
+  // initialize internal data entries NDArray
+  void InitDataEntryMemory();
+  // initialize the internal resources for each op
+  void InitResources();
+  // initialize OpNode data structure
+  void InitOperators();
+  // initialize OpNode data structure
+  void InitCachedOps();
+  // initialize segments of code to run together as a group.
+  void InitOpSegs();
+  // assign context to the graph, this will mutate the graph.
+  void AssignContext(const Context default_ctx,
+                     const std::map<std::string, Context>& ctx_map,
+                     const std::vector<NDArray> &in_args,
+                     const std::vector<NDArray> &arg_grad_store,
+                     const std::vector<OpReqType> &grad_req_type,
+                     std::vector<Context> *ctx_plan);
+  // run ops from topo order start to end
+  void RunOps(bool is_train, size_t topo_start, size_t topo_end);
+  // internal computational graph
+  StaticGraph graph_;
+  // topological order of nodes in computation graph
+  // backward nodes always follow forward nodes
+  std::vector<uint32_t> topo_order_;
+  // whether to enable inplace space
+  bool enable_inplace_allocation_;
+  // total allocated space in bytes
+  size_t total_allocated_bytes_;
+  // total allocated temp space
+  size_t total_allocated_temp_;
+  // number of forward nodes in the graph
+  size_t num_forward_nodes_;
+  // whether to enable bulk execution
+  bool prefer_bulk_execution_;
+  // head gradient node in the graph, if there is backward pass
+  std::vector<uint32_t> head_grad_nodes_;
+  // mirror map of nodes, experimental feature, normally can be ignored.
+  std::map<uint32_t, uint32_t> mirror_source_map_;
+  // argument node in the graph, if there is backward pass
+  std::vector<StaticGraph::DataEntry> arg_grads_;
+  // operational nodes
+  std::vector<OpNode> op_nodes_;
+  // head NDArrays
+  std::vector<NDArray> heads_ndarray_;
+  // shared NDArrays
+  std::shared_ptr<GraphStoragePool> shared_mem_;
+  // monitor call back
+  std::function<void(const char*, void*)> monitor_callback_;
+  // cached segment operator
+  std::vector<CachedSegOpr> cached_seg_opr_;
+};  // class GraphExecutor
+}  // namespace mxnet
+#endif  // MXNET_SYMBOL_GRAPH_EXECUTOR_H_
