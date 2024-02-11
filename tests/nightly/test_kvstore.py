@@ -48,4 +48,19 @@ def test_group_kvstore(kv_type):
     kv.set_optimizer(mx.optimizer.create('test', lr))
     kv.init(keys, [mx.nd.zeros(s) for s in shapes])
     res = [np.zeros(s) for s in shapes]
-    out = [[mx.nd.zeros(s, mx.gpu(g)
+    out = [[mx.nd.zeros(s, mx.gpu(g)) for g in range(nworker)] for s in shapes]
+    for i in range(nrepeat):
+        kv.push(keys, [[
+            mx.nd.array(data[i][j][g], mx.gpu(g)) for g in range(nworker)]
+                       for j in range(len(keys))])
+
+        kv.pull(keys, out=out)
+        res = [a + b * lr for a, b in zip(res, [sum(d) for d in data[i]])]
+        for a, b in zip(res, out):
+            err = [np.sum(np.abs(o.asnumpy() - a)) for o in b]
+            err = sum(err) / np.sum(np.abs(a))
+            assert(err < 1e-6), (err, a.shape)
+
+test_group_kvstore('local_update_cpu')
+test_group_kvstore('local_allreduce_cpu')
+test_group_kvstore('local_allreduce_device')
