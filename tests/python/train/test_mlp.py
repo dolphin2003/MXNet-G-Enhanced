@@ -73,4 +73,28 @@ def test_mlp():
                                  allow_extra_params=True)
     feat = mfeat.predict(val_dataiter)
     assert feat.shape == (10000, 64)
-    # pickle the
+    # pickle the model
+    smodel = pickle.dumps(model)
+    model2 = pickle.loads(smodel)
+    prob2 = model2.predict(val_dataiter)
+    assert np.sum(np.abs(prob - prob2)) == 0
+
+    # load model from checkpoint
+    model3 = mx.model.FeedForward.load(prefix, num_epoch)
+    prob3 = model3.predict(val_dataiter)
+    assert np.sum(np.abs(prob - prob3)) == 0
+
+    # save model explicitly
+    model.save(prefix, 128)
+    model4 = mx.model.FeedForward.load(prefix, 128)
+    prob4 = model4.predict(val_dataiter)
+    assert np.sum(np.abs(prob - prob4)) == 0
+
+    for i in range(num_epoch):
+        os.remove('%s-%04d.params' % (prefix, i + 1))
+    os.remove('%s-symbol.json' % prefix)
+    os.remove('%s-0128.params' % prefix)
+
+
+if __name__ == "__main__":
+    test_mlp()
