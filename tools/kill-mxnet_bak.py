@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 
 import os, sys
-import threading
-from sets import Set
 
 if len(sys.argv) != 2:
   print "usage: %s <hostfile>" % sys.argv[0]
@@ -14,7 +12,6 @@ prog_name = "train"
 # Get host IPs
 with open(host_file, "r") as f:
   hosts = f.read().splitlines()
-hosts = list(Set(hosts))
 ssh_cmd = (
     "ssh "
     "-o StrictHostKeyChecking=no "
@@ -30,19 +27,9 @@ kill_cmd = (
     "xargs kill"
     )
 print kill_cmd
+for host in hosts:
+  cmd = ssh_cmd + host +" \""+ kill_cmd+"\""
+  print cmd
+  os.system(cmd)
 
-#author yegeyan
-def kill_workers(host):
-    cmd = ssh_cmd + host +" \""+ kill_cmd+"\""
-    print cmd
-    os.system(cmd)
-
-nodes_num = len(hosts)
-threads = [None] * nodes_num
-for i in range(nodes_num):
-    threads[i] = threading.Thread(target=kill_workers, args=(hosts[i],))
-    threads[i].start()
-    
-for i in range(nodes_num):
-    threads[i].join()
-    print "Done killing"
+  print "Done killing"
